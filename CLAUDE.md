@@ -184,9 +184,9 @@ Full reference: `docs/DESIGN_SYSTEM.md`
 5. **Dark mode is automatic** — just use semantic tokens and it works. Both `:root` and `.dark` are fully defined in globals.css
 6. **All interactive elements**: Add `transition-all duration-200`
 7. **All authenticated pages** must include `<NavHeader />` at the top
-8. **Frosted glass headers**: `bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80`
+8. **Frosted glass nav**: `bg-background/80 backdrop-blur-lg supports-[backdrop-filter]:bg-background/60 border-b border-border`
 9. **Page containers**: Use `py-10` consistent padding
-10. **Card hover**: `hover:shadow-md hover:ring-2 hover:ring-primary/10`
+10. **Card hover**: `hover:shadow-sm hover:ring-1 hover:ring-primary/10`
 
 ## Environment Variables
 

@@ -62,7 +62,7 @@ export default async function AdminDashboard() {
                 href={`/admin/${project.id}`}
                 className="block"
               >
-                <Card className="cursor-pointer transition-all duration-200 hover:shadow-md hover:ring-2 hover:ring-primary/10">
+                <Card className="cursor-pointer transition-all duration-200 hover:shadow-sm hover:ring-1 hover:ring-primary/10">
                   <CardHeader className="pb-2">
                     <div className="flex items-start justify-between gap-2">
                       <CardTitle className="text-base leading-snug">

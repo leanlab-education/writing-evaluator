@@ -1,22 +1,33 @@
 # Design System — Writing Evaluator
 
+## Design Philosophy
+
+Mercury-inspired: cool neutral palette, frosted glass navigation, surface layering for depth (not heavy shadows), generous radius. Clean, professional, warm enough for researchers.
+
 ## Color Architecture
 
 All colors are defined as CSS custom properties in `src/app/globals.css` using the oklch color space. Tailwind utility classes are generated via `@theme inline` registration.
 
 ### Core Theme Tokens
 
-Standard shadcn/ui tokens with warm undertones (hue ~65, low chroma). Both light (`:root`) and dark (`.dark`) modes are fully defined.
+Cool neutral tint (hue ~260, very low chroma) for backgrounds and surfaces. Primary accent is indigo (hue 280). Both light (`:root`) and dark (`.dark`) modes are fully defined.
 
 | Token | Light Usage | Dark Usage |
 |-------|-------------|------------|
-| `background` / `foreground` | Warm off-white / near-black | Warm charcoal / light gray |
-| `card` / `card-foreground` | White / dark text | Dark card / light text |
-| `muted` / `muted-foreground` | Subtle warm gray bg / secondary text | Dark muted bg / dim text |
-| `primary` / `primary-foreground` | Warm indigo (~280 hue) / white | Lighter indigo / dark text |
-| `accent` | Warm tinted hover bg | Dark accent bg |
+| `background` / `foreground` | Cool off-white / near-black | Cool charcoal / light gray |
+| `card` / `card-foreground` | Near-white (elevated above bg) / dark text | Dark card / light text |
+| `muted` / `muted-foreground` | Subtle cool gray bg / secondary text | Dark muted bg / dim text |
+| `primary` / `primary-foreground` | Indigo (~280 hue) / white | Lighter indigo / dark text |
+| `accent` | Cool tinted hover bg | Dark accent bg |
 | `destructive` | Warm red | Lighter warm red |
 | `success` | Warm green | Lighter warm green |
+
+### Surface Layering
+
+Depth comes from background color steps, not heavy shadows (Mercury pattern):
+- `background` (page) → `card` (elevated surfaces) — visible tint difference
+- Light: bg `oklch(0.975)` vs card `oklch(0.995)` — cards float above the page
+- Hover states use `hover:shadow-sm` — subtle, not dramatic
 
 ### Semantic Domain Tokens
 
@@ -75,8 +86,9 @@ border-content-feedback-border bg-content-feedback-bg text-content-feedback-text
 ## Shared Components
 
 ### NavHeader (`src/components/nav-header.tsx`)
-Sticky frosted glass header on all authenticated pages.
-- `bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80`
+Frosted glass sticky header on all authenticated pages.
+- `bg-background/80 backdrop-blur-lg border-b border-border`
+- In supported browsers: `supports-[backdrop-filter]:bg-background/60`
 - Contains: app title link, theme toggle, user email (hidden mobile), sign out
 - Height: `h-14`, max-width: `max-w-7xl`
 
@@ -88,9 +100,9 @@ Client component. Toggles `.dark` class, persists to localStorage.
 1. **Never use hardcoded Tailwind colors** — always use semantic tokens or core theme tokens
 2. **Status/scoring/content colors have dedicated tokens** — don't reach for raw color classes
 3. **All interactive elements**: `transition-all duration-200`
-4. **Card hover effects**: `hover:shadow-md hover:ring-2 hover:ring-primary/10`
+4. **Card hover effects**: `hover:shadow-sm hover:ring-1 hover:ring-primary/10`
 5. **Page containers**: `py-10` consistent padding
-6. **Frosted glass headers**: `bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80`
+6. **Frosted glass nav**: `bg-background/80 backdrop-blur-lg supports-[backdrop-filter]:bg-background/60 border-b border-border`
 7. **Dark mode**: Automatic — just use semantic tokens, never hardcode light-only colors
 8. **Typography**: Use `text-foreground` for primary, `text-muted-foreground` for secondary
 9. **Success states**: Use `text-success` / `bg-success/10`, not green-*

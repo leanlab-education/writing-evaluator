@@ -69,7 +69,7 @@ export function EvaluatorDashboard({
               return (
                 <Card
                   key={ep.id}
-                  className="transition-all duration-200 hover:shadow-md hover:ring-2 hover:ring-primary/10"
+                  className="transition-all duration-200 hover:shadow-sm hover:ring-1 hover:ring-primary/10"
                 >
                   <CardHeader className="pb-2">
                     <div className="flex items-start justify-between gap-2">
