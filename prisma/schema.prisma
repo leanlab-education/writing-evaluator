@@ -1,0 +1,169 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================
+// Auth
+// ============================================
+
+model User {
+  id             String   @id @default(cuid())
+  name           String?
+  email          String   @unique
+  hashedPassword String?
+  role           Role     @default(EVALUATOR)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  projects ProjectEvaluator[]
+  scores   Score[]
+}
+
+enum Role {
+  ADMIN
+  EVALUATOR
+}
+
+// ============================================
+// Projects
+// ============================================
+
+model Project {
+  id                   String        @id @default(cuid())
+  name                 String
+  description          String?
+  status               ProjectStatus @default(SETUP)
+  discrepancyThreshold Int           @default(1)
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  rubric        RubricDimension[]
+  feedbackItems FeedbackItem[]
+  evaluators    ProjectEvaluator[]
+  assignments   Assignment[]
+}
+
+enum ProjectStatus {
+  SETUP
+  ACTIVE
+  RECONCILIATION
+  COMPLETE
+}
+
+// ============================================
+// Rubric (configurable per project)
+// ============================================
+
+model RubricDimension {
+  id             String  @id @default(cuid())
+  projectId      String
+  key            String
+  label          String
+  description    String?
+  sortOrder      Int
+  scaleMin       Int     @default(1)
+  scaleMax       Int     @default(3)
+  scoreLabelJson String? // JSON: {"1":"Not Present","2":"Unclear","3":"Present"}
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  scores  Score[]
+
+  @@unique([projectId, key])
+}
+
+// ============================================
+// Feedback Items (imported from CSV)
+// ============================================
+
+model FeedbackItem {
+  id              String         @id @default(cuid())
+  projectId       String
+  cycleId         String?
+  studentId       String
+  studentResponse String
+  feedbackId      String
+  annotatorId     String?
+  feedbackText    String
+  feedbackSource  FeedbackSource
+  displayOrder    Int?
+  createdAt       DateTime       @default(now())
+
+  project     Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  assignments Assignment[]
+  scores      Score[]
+
+  @@unique([projectId, feedbackId])
+}
+
+enum FeedbackSource {
+  AI
+  HUMAN
+}
+
+// ============================================
+// Evaluator Assignments
+// ============================================
+
+model ProjectEvaluator {
+  id        String   @id @default(cuid())
+  projectId String
+  userId    String
+  createdAt DateTime @default(now())
+
+  project     Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assignments Assignment[]
+
+  @@unique([projectId, userId])
+}
+
+model Assignment {
+  id             String           @id @default(cuid())
+  projectId      String
+  evaluatorId    String
+  feedbackItemId String
+  status         AssignmentStatus @default(PENDING)
+  createdAt      DateTime         @default(now())
+
+  project      Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  evaluator    ProjectEvaluator @relation(fields: [evaluatorId], references: [id], onDelete: Cascade)
+  feedbackItem FeedbackItem     @relation(fields: [feedbackItemId], references: [id], onDelete: Cascade)
+
+  @@unique([evaluatorId, feedbackItemId])
+}
+
+enum AssignmentStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETE
+}
+
+// ============================================
+// Scores
+// ============================================
+
+model Score {
+  id              String    @id @default(cuid())
+  feedbackItemId  String
+  userId          String
+  dimensionId     String
+  value           Int
+  rationale       String?
+  isReconciled    Boolean   @default(false)
+  reconciledFrom  String?
+  notes           String?
+  startedAt       DateTime?
+  scoredAt        DateTime  @default(now())
+  durationSeconds Int?
+
+  feedbackItem FeedbackItem    @relation(fields: [feedbackItemId], references: [id], onDelete: Cascade)
+  user         User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  dimension    RubricDimension @relation(fields: [dimensionId], references: [id], onDelete: Cascade)
+
+  @@unique([feedbackItemId, userId, dimensionId, isReconciled])
+}

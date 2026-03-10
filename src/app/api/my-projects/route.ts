@@ -1,16 +1,13 @@
 import { auth } from '@/lib/auth'
-import { redirect } from 'next/navigation'
 import { prisma } from '@/lib/db'
-import { EvaluatorDashboard } from '@/components/evaluator-dashboard'
+import { NextResponse } from 'next/server'
 
-export default async function HomePage() {
+export async function GET() {
   const session = await auth()
-  if (!session?.user) redirect('/login')
+  if (!session?.user) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
 
-  // Admins go straight to the admin dashboard
-  if (session.user.role === 'ADMIN') redirect('/admin')
-
-  // Evaluator: fetch assigned projects server-side
   const evaluatorProjects = await prisma.projectEvaluator.findMany({
     where: { userId: session.user.id },
     include: {
@@ -45,7 +42,7 @@ export default async function HomePage() {
     completedCounts.map((c) => [c.evaluatorId, c._count.id])
   )
 
-  const projects = evaluatorProjects.map((ep) => ({
+  const result = evaluatorProjects.map((ep) => ({
     id: ep.id,
     projectId: ep.projectId,
     project: ep.project,
@@ -53,10 +50,5 @@ export default async function HomePage() {
     completedCount: completedMap.get(ep.id) || 0,
   }))
 
-  return (
-    <EvaluatorDashboard
-      projects={projects}
-      userName={session.user.name || session.user.email || 'Evaluator'}
-    />
-  )
+  return NextResponse.json(result)
 }

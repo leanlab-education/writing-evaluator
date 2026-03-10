@@ -1,0 +1,753 @@
+'use client'
+
+import { useState, useCallback, useRef, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
+import { Progress } from '@/components/ui/progress'
+import { Badge } from '@/components/ui/badge'
+import {
+  ChevronLeft,
+  ChevronRight,
+  CheckCircle,
+  Clock,
+  Loader2,
+  AlertTriangle,
+} from 'lucide-react'
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+interface RubricDimension {
+  id: string
+  key: string
+  label: string
+  description: string | null
+  sortOrder: number
+  scaleMin: number
+  scaleMax: number
+  scoreLabelJson: string | null
+}
+
+interface FeedbackItem {
+  id: string
+  studentResponse: string
+  feedbackText: string
+  displayOrder: number | null
+}
+
+interface ProjectData {
+  id: string
+  name: string
+  rubric: RubricDimension[]
+}
+
+interface DimensionScore {
+  dimensionId: string
+  value: number | null
+  rationale: string
+}
+
+interface ItemScoreState {
+  scores: DimensionScore[]
+  notes: string
+  startedAt: string | null
+  saved: boolean
+}
+
+interface ExistingScore {
+  dimensionId: string
+  value: number
+  rationale: string | null
+  notes: string | null
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function parseScoreLabels(
+  json: string | null
+): Record<number, { label: string; description?: string }> {
+  if (!json) return {}
+  try {
+    return JSON.parse(json)
+  } catch {
+    return {}
+  }
+}
+
+function getScoreColor(value: number, min: number, max: number): string {
+  if (max === min) return 'border-yellow-400 bg-yellow-50 text-yellow-800'
+  const ratio = (value - min) / (max - min)
+  if (ratio <= 0.25) return 'border-red-400 bg-red-50 text-red-800'
+  if (ratio < 0.75) return 'border-yellow-400 bg-yellow-50 text-yellow-800'
+  return 'border-green-400 bg-green-50 text-green-800'
+}
+
+function getSelectedScoreColor(
+  value: number,
+  min: number,
+  max: number
+): string {
+  if (max === min) return 'bg-yellow-500 text-white border-yellow-500'
+  const ratio = (value - min) / (max - min)
+  if (ratio <= 0.25) return 'bg-red-500 text-white border-red-500'
+  if (ratio < 0.75) return 'bg-yellow-500 text-white border-yellow-500'
+  return 'bg-green-500 text-white border-green-500'
+}
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
+export function EvaluateClient({
+  projectId,
+  userName,
+}: {
+  projectId: string
+  userName: string
+}) {
+  const router = useRouter()
+
+  // Data
+  const [project, setProject] = useState<ProjectData | null>(null)
+  const [items, setItems] = useState<FeedbackItem[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  // Navigation
+  const [currentIndex, setCurrentIndex] = useState(0)
+
+  // Per-item scoring state, keyed by feedbackItem id
+  const [itemScores, setItemScores] = useState<Record<string, ItemScoreState>>(
+    {}
+  )
+
+  // UI toggles
+  const [showRationale, setShowRationale] = useState(false)
+  const [saving, setSaving] = useState(false)
+
+  // Timing
+  const interactedRef = useRef(false)
+
+  // ---------------------------------------------------------------------------
+  // Fetch data
+  // ---------------------------------------------------------------------------
+
+  const fetchData = useCallback(async () => {
+    try {
+      setLoading(true)
+      setError(null)
+
+      const [projectRes, itemsRes] = await Promise.all([
+        fetch(`/api/projects/${projectId}`),
+        fetch(`/api/feedback-items?projectId=${projectId}`),
+      ])
+
+      if (!projectRes.ok) {
+        throw new Error(
+          `Failed to load project: ${projectRes.status} ${projectRes.statusText}`
+        )
+      }
+      if (!itemsRes.ok) {
+        throw new Error(
+          `Failed to load feedback items: ${itemsRes.status} ${itemsRes.statusText}`
+        )
+      }
+
+      const projectData: ProjectData = await projectRes.json()
+      const itemsData: FeedbackItem[] = await itemsRes.json()
+
+      // Sort rubric by sortOrder
+      projectData.rubric.sort((a, b) => a.sortOrder - b.sortOrder)
+
+      // Sort items by displayOrder (nulls last), then by id for stable ordering
+      itemsData.sort((a, b) => {
+        const aOrd = a.displayOrder ?? Number.MAX_SAFE_INTEGER
+        const bOrd = b.displayOrder ?? Number.MAX_SAFE_INTEGER
+        if (aOrd !== bOrd) return aOrd - bOrd
+        return a.id.localeCompare(b.id)
+      })
+
+      setProject(projectData)
+      setItems(itemsData)
+
+      // Initialize score state for each item
+      const initialScores: Record<string, ItemScoreState> = {}
+      for (const item of itemsData) {
+        initialScores[item.id] = {
+          scores: projectData.rubric.map((dim) => ({
+            dimensionId: dim.id,
+            value: null,
+            rationale: '',
+          })),
+          notes: '',
+          startedAt: null,
+          saved: false,
+        }
+      }
+
+      // Load any existing scores from the server
+      try {
+        const existingRes = await fetch(
+          `/api/scores?projectId=${projectId}`
+        )
+        if (existingRes.ok) {
+          const existingScores: {
+            feedbackItemId: string
+            scores: ExistingScore[]
+          }[] = await existingRes.json()
+
+          for (const group of existingScores) {
+            if (initialScores[group.feedbackItemId]) {
+              const state = initialScores[group.feedbackItemId]
+              for (const existing of group.scores) {
+                const dimScore = state.scores.find(
+                  (s) => s.dimensionId === existing.dimensionId
+                )
+                if (dimScore) {
+                  dimScore.value = existing.value
+                  dimScore.rationale = existing.rationale ?? ''
+                }
+                // Use notes from first score entry (they share notes)
+                if (existing.notes) {
+                  state.notes = existing.notes
+                }
+              }
+              // Mark as saved if all dimensions have values
+              const allScored = state.scores.every((s) => s.value !== null)
+              if (allScored) {
+                state.saved = true
+              }
+            }
+          }
+        }
+      } catch {
+        // Non-critical — just means we start fresh
+      }
+
+      setItemScores(initialScores)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load data')
+    } finally {
+      setLoading(false)
+    }
+  }, [projectId])
+
+  useEffect(() => {
+    fetchData()
+  }, [fetchData])
+
+  // ---------------------------------------------------------------------------
+  // Reset interaction timer when navigating items
+  // ---------------------------------------------------------------------------
+
+  useEffect(() => {
+    interactedRef.current = false
+  }, [currentIndex])
+
+  // ---------------------------------------------------------------------------
+  // Derived state
+  // ---------------------------------------------------------------------------
+
+  const currentItem = items[currentIndex] ?? null
+  const currentScoreState = currentItem ? itemScores[currentItem.id] : null
+  const scoredCount = Object.values(itemScores).filter((s) => s.saved).length
+  const totalCount = items.length
+  const allComplete = totalCount > 0 && scoredCount === totalCount
+  const progressPercent = totalCount > 0 ? (scoredCount / totalCount) * 100 : 0
+
+  const allDimensionsScored =
+    currentScoreState?.scores.every((s) => s.value !== null) ?? false
+
+  // ---------------------------------------------------------------------------
+  // Score handlers
+  // ---------------------------------------------------------------------------
+
+  function handleScoreChange(dimensionId: string, value: number) {
+    if (!currentItem) return
+
+    // Mark first interaction time
+    if (!interactedRef.current) {
+      interactedRef.current = true
+      setItemScores((prev) => ({
+        ...prev,
+        [currentItem.id]: {
+          ...prev[currentItem.id],
+          startedAt: prev[currentItem.id].startedAt ?? new Date().toISOString(),
+        },
+      }))
+    }
+
+    setItemScores((prev) => ({
+      ...prev,
+      [currentItem.id]: {
+        ...prev[currentItem.id],
+        saved: false,
+        scores: prev[currentItem.id].scores.map((s) =>
+          s.dimensionId === dimensionId ? { ...s, value } : s
+        ),
+      },
+    }))
+  }
+
+  function handleRationaleChange(dimensionId: string, rationale: string) {
+    if (!currentItem) return
+    setItemScores((prev) => ({
+      ...prev,
+      [currentItem.id]: {
+        ...prev[currentItem.id],
+        scores: prev[currentItem.id].scores.map((s) =>
+          s.dimensionId === dimensionId ? { ...s, rationale } : s
+        ),
+      },
+    }))
+  }
+
+  function handleNotesChange(notes: string) {
+    if (!currentItem) return
+    setItemScores((prev) => ({
+      ...prev,
+      [currentItem.id]: {
+        ...prev[currentItem.id],
+        notes,
+      },
+    }))
+  }
+
+  // ---------------------------------------------------------------------------
+  // Save
+  // ---------------------------------------------------------------------------
+
+  async function handleSave() {
+    if (!currentItem || !currentScoreState || !allDimensionsScored) return
+
+    setSaving(true)
+    try {
+      const startedAt = currentScoreState.startedAt ?? new Date().toISOString()
+      const durationSeconds = Math.round(
+        (Date.now() - new Date(startedAt).getTime()) / 1000
+      )
+
+      const payload = {
+        feedbackItemId: currentItem.id,
+        scores: currentScoreState.scores
+          .filter((s) => s.value !== null)
+          .map((s) => ({
+            dimensionId: s.dimensionId,
+            value: s.value!,
+            rationale: s.rationale || undefined,
+          })),
+        notes: currentScoreState.notes || undefined,
+        startedAt,
+        durationSeconds,
+      }
+
+      const res = await fetch('/api/scores', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+
+      if (!res.ok) {
+        const errText = await res.text()
+        throw new Error(`Save failed: ${errText}`)
+      }
+
+      // Mark saved
+      setItemScores((prev) => ({
+        ...prev,
+        [currentItem.id]: {
+          ...prev[currentItem.id],
+          saved: true,
+        },
+      }))
+
+      // Auto-advance to next unscored item
+      const nextUnscoredIndex = items.findIndex(
+        (item, i) => i > currentIndex && !itemScores[item.id]?.saved
+      )
+      if (nextUnscoredIndex !== -1) {
+        setCurrentIndex(nextUnscoredIndex)
+      } else if (currentIndex < items.length - 1) {
+        setCurrentIndex(currentIndex + 1)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save scores')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Loading / error states
+  // ---------------------------------------------------------------------------
+
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-zinc-50">
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 className="size-8 animate-spin text-zinc-400" />
+          <p className="text-sm text-zinc-500">Loading evaluation...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-zinc-50">
+        <Card className="max-w-md">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-red-600">
+              <AlertTriangle className="size-5" />
+              Error
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-zinc-600">{error}</p>
+            <Button
+              className="mt-4"
+              variant="outline"
+              onClick={() => {
+                setError(null)
+                fetchData()
+              }}
+            >
+              Try Again
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  if (!project || items.length === 0) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-zinc-50">
+        <Card className="max-w-md">
+          <CardHeader>
+            <CardTitle>No Items to Evaluate</CardTitle>
+            <CardDescription>
+              There are no feedback items assigned to you for this project.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button variant="outline" onClick={() => router.push('/')}>
+              Return to Dashboard
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  // ---------------------------------------------------------------------------
+  // Completion screen
+  // ---------------------------------------------------------------------------
+
+  if (allComplete) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-zinc-50">
+        <Card className="max-w-lg text-center">
+          <CardHeader>
+            <div className="mx-auto mb-2 flex size-16 items-center justify-center rounded-full bg-green-100">
+              <CheckCircle className="size-8 text-green-600" />
+            </div>
+            <CardTitle className="text-xl">All Items Scored!</CardTitle>
+            <CardDescription>
+              You have completed scoring all {totalCount} feedback items for{' '}
+              <span className="font-medium text-zinc-700">
+                {project.name}
+              </span>
+              .
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3 sm:flex-row sm:justify-center">
+            <Button
+              variant="outline"
+              onClick={() => setCurrentIndex(0)}
+            >
+              Review Scores
+            </Button>
+            <Button onClick={() => router.push('/')}>
+              Return to Dashboard
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  // ---------------------------------------------------------------------------
+  // Main scoring interface
+  // ---------------------------------------------------------------------------
+
+  const rubric = project.rubric
+
+  return (
+    <div className="flex min-h-screen flex-col bg-zinc-50">
+      {/* Header */}
+      <header className="sticky top-0 z-10 border-b bg-white px-4 py-3 shadow-sm">
+        <div className="mx-auto flex max-w-7xl flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <h1 className="text-lg font-semibold text-zinc-900">
+                {project.name}
+              </h1>
+            </div>
+            <Badge variant="secondary">{userName}</Badge>
+          </div>
+
+          {/* Progress bar */}
+          <div className="flex items-center gap-3">
+            <span className="text-sm font-medium text-zinc-600">
+              {scoredCount} / {totalCount} scored
+            </span>
+            <div className="flex-1">
+              <Progress value={progressPercent} />
+            </div>
+          </div>
+
+          {/* Navigation */}
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="icon-sm"
+              disabled={currentIndex === 0}
+              onClick={() => setCurrentIndex((i) => i - 1)}
+            >
+              <ChevronLeft className="size-4" />
+            </Button>
+
+            <div className="flex flex-1 flex-wrap items-center gap-1.5 overflow-x-auto py-1">
+              {items.map((item, i) => {
+                const isCurrent = i === currentIndex
+                const isScored = itemScores[item.id]?.saved
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => setCurrentIndex(i)}
+                    className={`flex size-7 shrink-0 items-center justify-center rounded-full text-xs font-medium transition-colors ${
+                      isCurrent
+                        ? 'bg-purple-600 text-white ring-2 ring-purple-300'
+                        : isScored
+                          ? 'bg-green-500 text-white'
+                          : 'bg-zinc-200 text-zinc-600 hover:bg-zinc-300'
+                    }`}
+                  >
+                    {i + 1}
+                  </button>
+                )
+              })}
+            </div>
+
+            <Button
+              variant="outline"
+              size="icon-sm"
+              disabled={currentIndex === items.length - 1}
+              onClick={() => setCurrentIndex((i) => i + 1)}
+            >
+              <ChevronRight className="size-4" />
+            </Button>
+          </div>
+        </div>
+      </header>
+
+      {/* Split pane: left (content) + right (rubric) */}
+      <main className="mx-auto flex w-full max-w-7xl flex-1 gap-6 p-4 lg:p-6">
+        {/* Left column: student response + feedback */}
+        <div className="flex w-full flex-col gap-4 lg:w-1/2">
+          <Card className="border-blue-200 bg-blue-50/50">
+            <CardHeader>
+              <CardTitle className="text-blue-900">Student Response</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="whitespace-pre-wrap text-sm leading-relaxed text-blue-900/80">
+                {currentItem?.studentResponse}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-amber-200 bg-amber-50/50">
+            <CardHeader>
+              <CardTitle className="text-amber-900">
+                Feedback to Evaluate
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="whitespace-pre-wrap text-sm leading-relaxed text-amber-900/80">
+                {currentItem?.feedbackText}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Right column: rubric scoring */}
+        <div className="flex w-full flex-col gap-4 lg:w-1/2">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle>Score This Feedback</CardTitle>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowRationale((v) => !v)}
+                >
+                  {showRationale ? 'Hide' : 'Show'} Rationale Fields
+                </Button>
+              </div>
+              <CardDescription>
+                Rate each dimension below. All dimensions must be scored before
+                saving.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-6">
+              {rubric.map((dim) => {
+                const scoreLabels = parseScoreLabels(dim.scoreLabelJson)
+                const currentValue =
+                  currentScoreState?.scores.find(
+                    (s) => s.dimensionId === dim.id
+                  )?.value ?? null
+                const currentRationale =
+                  currentScoreState?.scores.find(
+                    (s) => s.dimensionId === dim.id
+                  )?.rationale ?? ''
+
+                const scaleOptions: number[] = []
+                for (let v = dim.scaleMin; v <= dim.scaleMax; v++) {
+                  scaleOptions.push(v)
+                }
+
+                return (
+                  <div key={dim.id} className="flex flex-col gap-2">
+                    <div>
+                      <Label className="text-sm font-semibold text-zinc-900">
+                        {dim.label}
+                      </Label>
+                      {dim.description && (
+                        <p className="mt-0.5 text-xs text-zinc-500">
+                          {dim.description}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                      {scaleOptions.map((val) => {
+                        const label = scoreLabels[val]
+                        const isSelected = currentValue === val
+                        return (
+                          <button
+                            key={val}
+                            onClick={() => handleScoreChange(dim.id, val)}
+                            className={`flex flex-col items-center rounded-lg border-2 px-3 py-2 text-center transition-all ${
+                              isSelected
+                                ? getSelectedScoreColor(
+                                    val,
+                                    dim.scaleMin,
+                                    dim.scaleMax
+                                  )
+                                : `${getScoreColor(val, dim.scaleMin, dim.scaleMax)} hover:shadow-md`
+                            }`}
+                          >
+                            <span className="text-lg font-bold">{val}</span>
+                            {label && (
+                              <span className="mt-0.5 text-[10px] font-medium leading-tight">
+                                {label.label}
+                              </span>
+                            )}
+                          </button>
+                        )
+                      })}
+                    </div>
+
+                    {currentValue !== null && scoreLabels[currentValue] && (
+                      <p className="text-xs italic text-zinc-500">
+                        {scoreLabels[currentValue].description}
+                      </p>
+                    )}
+
+                    {showRationale && (
+                      <Textarea
+                        placeholder={`Rationale for ${dim.label} score...`}
+                        value={currentRationale}
+                        onChange={(e) =>
+                          handleRationaleChange(dim.id, e.target.value)
+                        }
+                        className="mt-1 text-sm"
+                        rows={2}
+                      />
+                    )}
+                  </div>
+                )
+              })}
+
+              {/* Notes */}
+              <div className="border-t pt-4">
+                <Label className="text-sm font-semibold text-zinc-900">
+                  Notes (optional)
+                </Label>
+                <Textarea
+                  placeholder="Any additional notes about this feedback item..."
+                  value={currentScoreState?.notes ?? ''}
+                  onChange={(e) => handleNotesChange(e.target.value)}
+                  className="mt-2 text-sm"
+                  rows={3}
+                />
+              </div>
+
+              {/* Timing indicator */}
+              {currentScoreState?.startedAt && (
+                <div className="flex items-center gap-1.5 text-xs text-zinc-400">
+                  <Clock className="size-3" />
+                  <span>
+                    Started{' '}
+                    {new Date(currentScoreState.startedAt).toLocaleTimeString()}
+                  </span>
+                </div>
+              )}
+
+              {/* Save button */}
+              <Button
+                className="w-full"
+                size="lg"
+                disabled={!allDimensionsScored || saving}
+                onClick={handleSave}
+              >
+                {saving ? (
+                  <>
+                    <Loader2 className="size-4 animate-spin" />
+                    Saving...
+                  </>
+                ) : currentScoreState?.saved ? (
+                  <>
+                    <CheckCircle className="size-4" />
+                    Update & Continue
+                  </>
+                ) : (
+                  'Save & Continue'
+                )}
+              </Button>
+
+              {!allDimensionsScored && (
+                <p className="text-center text-xs text-zinc-400">
+                  Score all {rubric.length} dimensions to enable saving
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      </main>
+    </div>
+  )
+}
