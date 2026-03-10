@@ -41,6 +41,8 @@ import {
   ArrowLeft,
   CheckCircle,
 } from 'lucide-react'
+import { NavHeader } from '@/components/nav-header'
+import { statusColors } from '@/lib/status-colors'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -89,13 +91,6 @@ interface EvaluatorRow {
 // ---------------------------------------------------------------------------
 // Status helpers
 // ---------------------------------------------------------------------------
-
-const statusColors: Record<string, string> = {
-  SETUP: 'bg-yellow-100 text-yellow-800',
-  ACTIVE: 'bg-green-100 text-green-800',
-  RECONCILIATION: 'bg-blue-100 text-blue-800',
-  COMPLETE: 'bg-gray-100 text-gray-800',
-}
 
 const statusFlow: Record<string, string> = {
   SETUP: 'ACTIVE',
@@ -330,7 +325,8 @@ export function ProjectDetailClient({
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:px-8">
+      <NavHeader />
+      <div className="mx-auto max-w-5xl px-4 py-10 sm:px-6 lg:px-8">
         {/* Header */}
         <div className="mb-6">
           <Button

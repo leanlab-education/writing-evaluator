@@ -10,16 +10,10 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { FileText, Users, Plus } from 'lucide-react'
+import { FileText, Users } from 'lucide-react'
 import { CreateProjectDialog } from '@/components/create-project-dialog'
-
-const statusColors: Record<string, string> = {
-  SETUP: 'bg-yellow-100 text-yellow-800',
-  ACTIVE: 'bg-green-100 text-green-800',
-  RECONCILIATION: 'bg-blue-100 text-blue-800',
-  COMPLETE: 'bg-gray-100 text-gray-800',
-}
+import { NavHeader } from '@/components/nav-header'
+import { statusColors } from '@/lib/status-colors'
 
 export default async function AdminDashboard() {
   const session = await auth()
@@ -40,7 +34,8 @@ export default async function AdminDashboard() {
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:px-8">
+      <NavHeader />
+      <div className="mx-auto max-w-5xl px-4 py-10 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Projects</h1>
@@ -60,14 +55,14 @@ export default async function AdminDashboard() {
             </p>
           </div>
         ) : (
-          <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="mt-6 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
             {projects.map((project) => (
               <Link
                 key={project.id}
                 href={`/admin/${project.id}`}
                 className="block"
               >
-                <Card className="cursor-pointer transition-shadow hover:shadow-md">
+                <Card className="cursor-pointer transition-all duration-200 hover:shadow-md hover:ring-2 hover:ring-primary/10">
                   <CardHeader className="pb-2">
                     <div className="flex items-start justify-between gap-2">
                       <CardTitle className="text-base leading-snug">

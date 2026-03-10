@@ -21,6 +21,7 @@ import {
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Upload, ArrowLeft, CheckCircle, Loader2, FileText } from 'lucide-react'
 import { parseCSV, validateCSVRow, type FeedbackCSVRow } from '@/lib/csv-parser'
+import { NavHeader } from '@/components/nav-header'
 
 export function ImportClient({ projectId }: { projectId: string }) {
   const router = useRouter()
@@ -125,7 +126,8 @@ export function ImportClient({ projectId }: { projectId: string }) {
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:px-8">
+      <NavHeader />
+      <div className="mx-auto max-w-5xl px-4 py-10 sm:px-6 lg:px-8">
         {/* Header */}
         <div className="mb-6">
           <Button
@@ -147,7 +149,7 @@ export function ImportClient({ projectId }: { projectId: string }) {
         {importResult && (
           <Card className="mb-6">
             <CardContent className="py-8 text-center">
-              <CheckCircle className="mx-auto h-12 w-12 text-green-500" />
+              <CheckCircle className="mx-auto h-12 w-12 text-success" />
               <h3 className="mt-4 text-lg font-medium">Import Complete</h3>
               <p className="mt-1 text-sm text-muted-foreground">
                 Successfully imported {importResult.imported} of{' '}
@@ -180,9 +182,9 @@ export function ImportClient({ projectId }: { projectId: string }) {
         {!importResult && (
           <>
             <div
-              className={`mb-6 cursor-pointer rounded-lg border-2 border-dashed p-8 text-center transition-colors ${
+              className={`mb-6 cursor-pointer rounded-lg border-2 border-dashed p-8 text-center transition-all duration-200 ${
                 dragOver
-                  ? 'border-primary bg-primary/5'
+                  ? 'scale-[1.01] border-primary bg-primary/5 ring-2 ring-primary/20'
                   : 'border-muted-foreground/25 hover:border-muted-foreground/50'
               }`}
               onDrop={handleDrop}

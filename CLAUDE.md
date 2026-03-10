@@ -151,7 +151,7 @@ src/
 2. Clicks "Start Evaluating" → goes to `/evaluate/[projectId]`
 3. Split-pane UI: left shows student response + feedback text, right shows rubric scoring
 4. Score all dimensions (1-3 scale per dimension) → Save & Continue → auto-advance
-5. Navigation: numbered circles show scored (green) / current (purple) / unscored (gray)
+5. Navigation: numbered circles show scored / current / unscored (semantic color tokens)
 6. Timing: records `startedAt` and `durationSeconds` per item
 
 ### Export
@@ -170,6 +170,23 @@ src/
 | 5 | Scaffolding / Cognitive Load | 1-3 | Step-by-step guidance, appropriate grain size |
 
 Score labels: 1 = Not Present, 2 = Unclear, 3 = Present (with descriptions per dimension)
+
+## Design System
+
+Full reference: `docs/DESIGN_SYSTEM.md`
+
+**Key rules for all future development:**
+
+1. **Never use hardcoded Tailwind colors** (no `zinc-*`, `blue-*`, `green-*`, etc.) — always use semantic tokens (`text-foreground`, `bg-background`, `text-muted-foreground`) or domain tokens (`bg-status-active-bg`, `bg-score-high-solid`, `text-success`, `text-destructive`)
+2. **Status badges**: Import `statusColors` from `src/lib/status-colors.ts` — never define inline
+3. **Scoring colors**: Use `getScoreColor()` / `getSelectedScoreColor()` in evaluate-client — they return semantic token classes
+4. **Content cards**: Use `bg-content-student-*` / `bg-content-feedback-*` tokens for the split-pane evaluation view
+5. **Dark mode is automatic** — just use semantic tokens and it works. Both `:root` and `.dark` are fully defined in globals.css
+6. **All interactive elements**: Add `transition-all duration-200`
+7. **All authenticated pages** must include `<NavHeader />` at the top
+8. **Frosted glass headers**: `bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80`
+9. **Page containers**: Use `py-10` consistent padding
+10. **Card hover**: `hover:shadow-md hover:ring-2 hover:ring-primary/10`
 
 ## Environment Variables
 

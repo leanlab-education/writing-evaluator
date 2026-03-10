@@ -22,6 +22,7 @@ import {
   Loader2,
   AlertTriangle,
 } from 'lucide-react'
+import { NavHeader } from '@/components/nav-header'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -87,11 +88,14 @@ function parseScoreLabels(
 }
 
 function getScoreColor(value: number, min: number, max: number): string {
-  if (max === min) return 'border-yellow-400 bg-yellow-50 text-yellow-800'
+  if (max === min)
+    return 'border-score-mid-border bg-score-mid-bg text-score-mid-text'
   const ratio = (value - min) / (max - min)
-  if (ratio <= 0.25) return 'border-red-400 bg-red-50 text-red-800'
-  if (ratio < 0.75) return 'border-yellow-400 bg-yellow-50 text-yellow-800'
-  return 'border-green-400 bg-green-50 text-green-800'
+  if (ratio <= 0.25)
+    return 'border-score-low-border bg-score-low-bg text-score-low-text'
+  if (ratio < 0.75)
+    return 'border-score-mid-border bg-score-mid-bg text-score-mid-text'
+  return 'border-score-high-border bg-score-high-bg text-score-high-text'
 }
 
 function getSelectedScoreColor(
@@ -99,11 +103,14 @@ function getSelectedScoreColor(
   min: number,
   max: number
 ): string {
-  if (max === min) return 'bg-yellow-500 text-white border-yellow-500'
+  if (max === min)
+    return 'bg-score-mid-solid text-white border-score-mid-solid'
   const ratio = (value - min) / (max - min)
-  if (ratio <= 0.25) return 'bg-red-500 text-white border-red-500'
-  if (ratio < 0.75) return 'bg-yellow-500 text-white border-yellow-500'
-  return 'bg-green-500 text-white border-green-500'
+  if (ratio <= 0.25)
+    return 'bg-score-low-solid text-white border-score-low-solid'
+  if (ratio < 0.75)
+    return 'bg-score-mid-solid text-white border-score-mid-solid'
+  return 'bg-score-high-solid text-white border-score-high-solid'
 }
 
 // ---------------------------------------------------------------------------
@@ -395,10 +402,10 @@ export function EvaluateClient({
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-zinc-50">
+      <div className="flex min-h-screen items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-3">
-          <Loader2 className="size-8 animate-spin text-zinc-400" />
-          <p className="text-sm text-zinc-500">Loading evaluation...</p>
+          <Loader2 className="size-8 animate-spin text-muted-foreground" />
+          <p className="text-sm text-muted-foreground">Loading evaluation...</p>
         </div>
       </div>
     )
@@ -406,16 +413,16 @@ export function EvaluateClient({
 
   if (error) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-zinc-50">
+      <div className="flex min-h-screen items-center justify-center bg-background">
         <Card className="max-w-md">
           <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-red-600">
+            <CardTitle className="flex items-center gap-2 text-destructive">
               <AlertTriangle className="size-5" />
               Error
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-sm text-zinc-600">{error}</p>
+            <p className="text-sm text-muted-foreground">{error}</p>
             <Button
               className="mt-4"
               variant="outline"
@@ -434,7 +441,7 @@ export function EvaluateClient({
 
   if (!project || items.length === 0) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-zinc-50">
+      <div className="flex min-h-screen items-center justify-center bg-background">
         <Card className="max-w-md">
           <CardHeader>
             <CardTitle>No Items to Evaluate</CardTitle>
@@ -458,33 +465,36 @@ export function EvaluateClient({
 
   if (allComplete) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-zinc-50">
-        <Card className="max-w-lg text-center">
-          <CardHeader>
-            <div className="mx-auto mb-2 flex size-16 items-center justify-center rounded-full bg-green-100">
-              <CheckCircle className="size-8 text-green-600" />
-            </div>
-            <CardTitle className="text-xl">All Items Scored!</CardTitle>
-            <CardDescription>
-              You have completed scoring all {totalCount} feedback items for{' '}
-              <span className="font-medium text-zinc-700">
-                {project.name}
-              </span>
-              .
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-3 sm:flex-row sm:justify-center">
-            <Button
-              variant="outline"
-              onClick={() => setCurrentIndex(0)}
-            >
-              Review Scores
-            </Button>
-            <Button onClick={() => router.push('/')}>
-              Return to Dashboard
-            </Button>
-          </CardContent>
-        </Card>
+      <div className="min-h-screen bg-background">
+        <NavHeader />
+        <div className="flex min-h-[calc(100vh-3.5rem)] items-center justify-center">
+          <Card className="max-w-lg text-center">
+            <CardHeader>
+              <div className="mx-auto mb-2 flex size-16 items-center justify-center rounded-full bg-success/10">
+                <CheckCircle className="size-8 text-success" />
+              </div>
+              <CardTitle className="text-xl">All Items Scored!</CardTitle>
+              <CardDescription>
+                You have completed scoring all {totalCount} feedback items for{' '}
+                <span className="font-medium text-foreground">
+                  {project.name}
+                </span>
+                .
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-3 sm:flex-row sm:justify-center">
+              <Button
+                variant="outline"
+                onClick={() => setCurrentIndex(0)}
+              >
+                Review Scores
+              </Button>
+              <Button onClick={() => router.push('/')}>
+                Return to Dashboard
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
       </div>
     )
   }
@@ -496,13 +506,15 @@ export function EvaluateClient({
   const rubric = project.rubric
 
   return (
-    <div className="flex min-h-screen flex-col bg-zinc-50">
-      {/* Header */}
-      <header className="sticky top-0 z-10 border-b bg-white px-4 py-3 shadow-sm">
+    <div className="flex min-h-screen flex-col bg-background">
+      <NavHeader />
+
+      {/* Evaluation sub-header */}
+      <header className="sticky top-14 z-10 border-b bg-background/95 px-4 py-3 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-background/80">
         <div className="mx-auto flex max-w-7xl flex-col gap-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <h1 className="text-lg font-semibold text-zinc-900">
+              <h1 className="text-lg font-semibold text-foreground">
                 {project.name}
               </h1>
             </div>
@@ -511,7 +523,7 @@ export function EvaluateClient({
 
           {/* Progress bar */}
           <div className="flex items-center gap-3">
-            <span className="text-sm font-medium text-zinc-600">
+            <span className="text-sm font-medium text-muted-foreground">
               {scoredCount} / {totalCount} scored
             </span>
             <div className="flex-1">
@@ -538,12 +550,12 @@ export function EvaluateClient({
                   <button
                     key={item.id}
                     onClick={() => setCurrentIndex(i)}
-                    className={`flex size-7 shrink-0 items-center justify-center rounded-full text-xs font-medium transition-colors ${
+                    className={`flex size-7 shrink-0 items-center justify-center rounded-full text-xs font-medium transition-all duration-200 ${
                       isCurrent
-                        ? 'bg-purple-600 text-white ring-2 ring-purple-300'
+                        ? 'bg-nav-current-bg text-nav-current-text ring-2 ring-nav-current-ring'
                         : isScored
-                          ? 'bg-green-500 text-white'
-                          : 'bg-zinc-200 text-zinc-600 hover:bg-zinc-300'
+                          ? 'bg-nav-scored-bg text-nav-scored-text'
+                          : 'bg-nav-unscored-bg text-nav-unscored-text hover:opacity-80'
                     }`}
                   >
                     {i + 1}
@@ -568,30 +580,33 @@ export function EvaluateClient({
       <main className="mx-auto flex w-full max-w-7xl flex-1 gap-6 p-4 lg:p-6">
         {/* Left column: student response + feedback */}
         <div className="flex w-full flex-col gap-4 lg:w-1/2">
-          <Card className="border-blue-200 bg-blue-50/50">
+          <Card className="border-content-student-border bg-content-student-bg">
             <CardHeader>
-              <CardTitle className="text-blue-900">Student Response</CardTitle>
+              <CardTitle className="text-content-student-text">Student Response</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="whitespace-pre-wrap text-sm leading-relaxed text-blue-900/80">
+              <div className="whitespace-pre-wrap text-sm leading-relaxed text-content-student-text/80">
                 {currentItem?.studentResponse}
               </div>
             </CardContent>
           </Card>
 
-          <Card className="border-amber-200 bg-amber-50/50">
+          <Card className="border-content-feedback-border bg-content-feedback-bg">
             <CardHeader>
-              <CardTitle className="text-amber-900">
+              <CardTitle className="text-content-feedback-text">
                 Feedback to Evaluate
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="whitespace-pre-wrap text-sm leading-relaxed text-amber-900/80">
+              <div className="whitespace-pre-wrap text-sm leading-relaxed text-content-feedback-text/80">
                 {currentItem?.feedbackText}
               </div>
             </CardContent>
           </Card>
         </div>
+
+        {/* Vertical divider on desktop */}
+        <div className="hidden w-px self-stretch bg-border lg:block" />
 
         {/* Right column: rubric scoring */}
         <div className="flex w-full flex-col gap-4 lg:w-1/2">
@@ -632,11 +647,11 @@ export function EvaluateClient({
                 return (
                   <div key={dim.id} className="flex flex-col gap-2">
                     <div>
-                      <Label className="text-sm font-semibold text-zinc-900">
+                      <Label className="text-sm font-semibold text-foreground">
                         {dim.label}
                       </Label>
                       {dim.description && (
-                        <p className="mt-0.5 text-xs text-zinc-500">
+                        <p className="mt-0.5 text-xs text-muted-foreground">
                           {dim.description}
                         </p>
                       )}
@@ -650,7 +665,7 @@ export function EvaluateClient({
                           <button
                             key={val}
                             onClick={() => handleScoreChange(dim.id, val)}
-                            className={`flex flex-col items-center rounded-lg border-2 px-3 py-2 text-center transition-all ${
+                            className={`flex flex-col items-center rounded-xl border-2 px-3 py-2 text-center transition-all duration-200 ${
                               isSelected
                                 ? getSelectedScoreColor(
                                     val,
@@ -672,7 +687,7 @@ export function EvaluateClient({
                     </div>
 
                     {currentValue !== null && scoreLabels[currentValue] && (
-                      <p className="text-xs italic text-zinc-500">
+                      <p className="text-xs italic text-muted-foreground">
                         {scoreLabels[currentValue].description}
                       </p>
                     )}
@@ -694,7 +709,7 @@ export function EvaluateClient({
 
               {/* Notes */}
               <div className="border-t pt-4">
-                <Label className="text-sm font-semibold text-zinc-900">
+                <Label className="text-sm font-semibold text-foreground">
                   Notes (optional)
                 </Label>
                 <Textarea
@@ -708,7 +723,7 @@ export function EvaluateClient({
 
               {/* Timing indicator */}
               {currentScoreState?.startedAt && (
-                <div className="flex items-center gap-1.5 text-xs text-zinc-400">
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                   <Clock className="size-3" />
                   <span>
                     Started{' '}
@@ -740,7 +755,7 @@ export function EvaluateClient({
               </Button>
 
               {!allDimensionsScored && (
-                <p className="text-center text-xs text-zinc-400">
+                <p className="text-center text-xs text-muted-foreground">
                   Score all {rubric.length} dimensions to enable saving
                 </p>
               )}

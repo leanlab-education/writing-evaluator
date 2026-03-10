@@ -10,7 +10,9 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Progress } from '@/components/ui/progress'
 import { FileText } from 'lucide-react'
+import { NavHeader } from '@/components/nav-header'
 
 interface EvaluatorProject {
   id: string
@@ -36,7 +38,8 @@ export function EvaluatorDashboard({
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6 lg:px-8">
+      <NavHeader />
+      <div className="mx-auto max-w-3xl px-4 py-10 sm:px-6 lg:px-8">
         <div className="mb-6">
           <h1 className="text-2xl font-bold tracking-tight">My Projects</h1>
           <p className="text-sm text-muted-foreground">
@@ -64,7 +67,10 @@ export function EvaluatorDashboard({
                   : 0
               const isComplete = pct === 100
               return (
-                <Card key={ep.id}>
+                <Card
+                  key={ep.id}
+                  className="transition-all duration-200 hover:shadow-md hover:ring-2 hover:ring-primary/10"
+                >
                   <CardHeader className="pb-2">
                     <div className="flex items-start justify-between gap-2">
                       <CardTitle className="text-base">
@@ -74,8 +80,8 @@ export function EvaluatorDashboard({
                         variant="outline"
                         className={
                           isComplete
-                            ? 'bg-green-100 text-green-800'
-                            : 'bg-blue-100 text-blue-800'
+                            ? 'bg-status-complete-bg text-status-complete-text'
+                            : 'bg-status-active-bg text-status-active-text'
                         }
                       >
                         {isComplete ? 'Complete' : `${pct}%`}
@@ -88,6 +94,9 @@ export function EvaluatorDashboard({
                     )}
                   </CardHeader>
                   <CardContent>
+                    <div className="mb-3">
+                      <Progress value={pct} />
+                    </div>
                     <div className="flex items-center justify-between">
                       <span className="text-sm text-muted-foreground">
                         {ep.completedCount} of {ep.assignmentCount} items scored
