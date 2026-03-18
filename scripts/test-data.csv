@@ -1,0 +1,6 @@
+Response_ID,Student_ID,Cycle_ID,Activity_ID,Prompt_ID,Student_Text,Feedback_ID,Feedback_Source,Annotator_ID,Feedback_Text
+R001,236356479,1,1,But,"AI robots are a good alternative to real pets but they can have high technological costs.",F001,Human,1,"Good start, but use evidence from the text to support your claim."
+R002,184729503,1,1,But,"Solar panels are helpful for the environment but they are expensive to install on houses.",F002,AI,999,"Nice work connecting your idea to the text! Try to be more specific about which details from the passage support your point."
+R003,392847561,1,1,Because,"Many students prefer online learning because they can work at their own pace and review material.",F003,Human,2,"Strong response! You clearly explained your reasoning with two specific details. Consider adding a quote from the text to make it even stronger."
+R004,571038264,1,2,Because,"Communities should invest in public transportation because it reduces traffic and helps the environment.",F004,AI,999,"You made a clear claim. Try to include a specific fact or detail from the reading to support your reasoning."
+R005,428193756,1,2,But,"Exercise is important for staying healthy but many people do not have time to work out every day.",F005,Human,1,"You've identified a strong counterpoint. Can you add evidence from the passage to explain why people struggle to find time?"

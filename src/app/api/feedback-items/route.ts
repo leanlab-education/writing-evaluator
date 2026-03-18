@@ -17,20 +17,28 @@ export async function GET(request: NextRequest) {
     )
   }
 
+  const batchId = request.nextUrl.searchParams.get('batchId')
   const isAdmin = session.user.role === 'ADMIN'
 
   // Base query: feedback items without feedbackSource (blinded)
   const feedbackItems = await prisma.feedbackItem.findMany({
-    where: { projectId },
+    where: {
+      projectId,
+      ...(batchId ? { batchId } : {}),
+    },
     select: {
       id: true,
       projectId: true,
+      responseId: true,
       cycleId: true,
       studentId: true,
+      activityId: true,
+      promptType: true,
       studentResponse: true,
       feedbackId: true,
-      annotatorId: true,
+      // annotatorId intentionally excluded — blinded
       feedbackText: true,
+      batchId: true,
       displayOrder: true,
       createdAt: true,
       // feedbackSource intentionally excluded — blinded
@@ -84,8 +92,11 @@ export async function POST(request: Request) {
   const data = items.map(
     (
       item: {
+        responseId?: string
         cycleId?: string
         studentId: string
+        activityId?: string
+        promptType?: string
         studentResponse: string
         feedbackId: string
         annotatorId?: string
@@ -95,8 +106,11 @@ export async function POST(request: Request) {
       index: number
     ) => ({
       projectId,
+      responseId: item.responseId || null,
       cycleId: item.cycleId || null,
       studentId: item.studentId,
+      activityId: item.activityId || null,
+      promptType: item.promptType || null,
       studentResponse: item.studentResponse,
       feedbackId: item.feedbackId,
       annotatorId: item.annotatorId || null,

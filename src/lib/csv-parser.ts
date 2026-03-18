@@ -1,21 +1,57 @@
 // Parse CSV text with quote-aware field splitting
 // Handles: quoted fields, commas inside quotes, escaped quotes
 
+// New 10-column Input_TEST format (from Quill data pipeline)
 export interface FeedbackCSVRow {
-  cycle_ID: string
-  student_ID: string
-  student_response: string
-  feedback_ID: string
-  annotator_ID: string
-  feedback_text: string
-  feedback_source: string // "AI" or "HUMAN"
+  Response_ID: string
+  Student_ID: string
+  Cycle_ID: string
+  Activity_ID: string
+  Prompt_ID: string
+  Student_Text: string
+  Feedback_ID: string
+  Feedback_Source: string // "AI" or "HUMAN"
+  Annotator_ID: string
+  Feedback_Text: string
+}
+
+// Column name mapping — supports both new (Input_TEST) and legacy formats
+const COLUMN_ALIASES: Record<string, keyof FeedbackCSVRow> = {
+  // New format (Input_TEST)
+  Response_ID: 'Response_ID',
+  Student_ID: 'Student_ID',
+  Cycle_ID: 'Cycle_ID',
+  Activity_ID: 'Activity_ID',
+  Prompt_ID: 'Prompt_ID',
+  Student_Text: 'Student_Text',
+  Feedback_ID: 'Feedback_ID',
+  Feedback_Source: 'Feedback_Source',
+  Annotator_ID: 'Annotator_ID',
+  Feedback_Text: 'Feedback_Text',
+  // Legacy format aliases
+  response_ID: 'Response_ID',
+  student_ID: 'Student_ID',
+  cycle_ID: 'Cycle_ID',
+  activity_ID: 'Activity_ID',
+  prompt_ID: 'Prompt_ID',
+  student_response: 'Student_Text',
+  feedback_ID: 'Feedback_ID',
+  feedback_source: 'Feedback_Source',
+  annotator_ID: 'Annotator_ID',
+  feedback_text: 'Feedback_Text',
 }
 
 export function parseCSV(text: string): FeedbackCSVRow[] {
   const lines = text.split('\n').filter((line) => line.trim())
   if (lines.length < 2) return []
 
-  const headers = parseLine(lines[0]).map((h) => h.trim())
+  const rawHeaders = parseLine(lines[0]).map((h) => h.trim())
+
+  // Map raw headers to canonical names via aliases
+  const mappedHeaders = rawHeaders.map(
+    (h) => COLUMN_ALIASES[h] ?? (h as keyof FeedbackCSVRow)
+  )
+
   const rows: FeedbackCSVRow[] = []
 
   for (let i = 1; i < lines.length; i++) {
@@ -23,7 +59,7 @@ export function parseCSV(text: string): FeedbackCSVRow[] {
     if (values.length === 0) continue
 
     const row: Record<string, string> = {}
-    headers.forEach((header, idx) => {
+    mappedHeaders.forEach((header, idx) => {
       row[header] = (values[idx] || '').trim()
     })
 
@@ -73,15 +109,14 @@ export function validateCSVRow(
   row: FeedbackCSVRow,
   index: number
 ): string | null {
-  if (!row.student_ID) return `Row ${index + 1}: missing student_ID`
-  if (!row.feedback_ID) return `Row ${index + 1}: missing feedback_ID`
-  if (!row.feedback_text) return `Row ${index + 1}: missing feedback_text`
-  if (!row.student_response)
-    return `Row ${index + 1}: missing student_response`
+  if (!row.Student_ID) return `Row ${index + 1}: missing Student_ID`
+  if (!row.Feedback_ID) return `Row ${index + 1}: missing Feedback_ID`
+  if (!row.Feedback_Text) return `Row ${index + 1}: missing Feedback_Text`
+  if (!row.Student_Text) return `Row ${index + 1}: missing Student_Text`
 
-  const source = row.feedback_source?.toUpperCase()
+  const source = row.Feedback_Source?.toUpperCase()
   if (source && source !== 'AI' && source !== 'HUMAN') {
-    return `Row ${index + 1}: feedback_source must be "AI" or "HUMAN", got "${row.feedback_source}"`
+    return `Row ${index + 1}: Feedback_Source must be "AI" or "HUMAN", got "${row.Feedback_Source}"`
   }
 
   return null

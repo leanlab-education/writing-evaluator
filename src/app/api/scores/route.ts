@@ -105,3 +105,68 @@ export async function POST(request: Request) {
 
   return NextResponse.json(result, { status: 201 })
 }
+
+// PUT /api/scores — auto-save upsert (partial or full)
+export async function PUT(request: Request) {
+  const session = await auth()
+  if (!session?.user) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  const body = await request.json()
+  const { feedbackItemId, scores, notes, startedAt } = body
+
+  if (!feedbackItemId) {
+    return NextResponse.json(
+      { error: 'feedbackItemId is required' },
+      { status: 400 }
+    )
+  }
+
+  // Upsert each score dimension
+  if (Array.isArray(scores) && scores.length > 0) {
+    await Promise.all(
+      scores.map(
+        (score: { dimensionId: string; value: number }) =>
+          prisma.score.upsert({
+            where: {
+              feedbackItemId_userId_dimensionId_isReconciled: {
+                feedbackItemId,
+                userId: session.user.id,
+                dimensionId: score.dimensionId,
+                isReconciled: false,
+              },
+            },
+            update: {
+              value: score.value,
+              scoredAt: new Date(),
+              ...(notes !== undefined ? { notes } : {}),
+              ...(startedAt ? { startedAt: new Date(startedAt) } : {}),
+            },
+            create: {
+              feedbackItemId,
+              userId: session.user.id,
+              dimensionId: score.dimensionId,
+              value: score.value,
+              notes: notes || null,
+              startedAt: startedAt ? new Date(startedAt) : null,
+            },
+          })
+      )
+    )
+  }
+
+  // If only notes changed (no scores), update notes on existing scores
+  if (notes !== undefined && (!scores || scores.length === 0)) {
+    await prisma.score.updateMany({
+      where: {
+        feedbackItemId,
+        userId: session.user.id,
+        isReconciled: false,
+      },
+      data: { notes },
+    })
+  }
+
+  return NextResponse.json({ saved: true })
+}

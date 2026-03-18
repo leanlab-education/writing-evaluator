@@ -20,8 +20,9 @@ model User {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  projects ProjectEvaluator[]
-  scores   Score[]
+  projects         ProjectEvaluator[]
+  scores           Score[]
+  batchAssignments BatchAssignment[]
 }
 
 enum Role {
@@ -46,6 +47,7 @@ model Project {
   feedbackItems FeedbackItem[]
   evaluators    ProjectEvaluator[]
   assignments   Assignment[]
+  batches       Batch[]
 }
 
 enum ProjectStatus {
@@ -83,17 +85,22 @@ model RubricDimension {
 model FeedbackItem {
   id              String         @id @default(cuid())
   projectId       String
+  responseId      String?        // Response_ID from CSV (L1↔L2 linkage key)
   cycleId         String?
   studentId       String
+  activityId      String?        // Activity_ID (which Quill activity)
+  promptType      String?        // Prompt_ID ("But" or "Because")
   studentResponse String
   feedbackId      String
   annotatorId     String?
   feedbackText    String
   feedbackSource  FeedbackSource
+  batchId         String?        // FK to Batch (null = unassigned to batch)
   displayOrder    Int?
   createdAt       DateTime       @default(now())
 
   project     Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  batch       Batch?       @relation(fields: [batchId], references: [id], onDelete: SetNull)
   assignments Assignment[]
   scores      Score[]
 
@@ -141,6 +148,37 @@ enum AssignmentStatus {
   PENDING
   IN_PROGRESS
   COMPLETE
+}
+
+// ============================================
+// Batches (groups of items for evaluator assignment)
+// ============================================
+
+model Batch {
+  id         String   @id @default(cuid())
+  projectId  String
+  name       String                    // e.g. "Activity 1 - But - Batch 1"
+  activityId String?                   // Quill activity this batch covers
+  promptType String?                   // "But" or "Because"
+  size       Int      @default(200)    // Target batch size
+  sortOrder  Int      @default(0)
+  createdAt  DateTime @default(now())
+
+  project       Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  feedbackItems FeedbackItem[]
+  assignments   BatchAssignment[]
+}
+
+model BatchAssignment {
+  id        String   @id @default(cuid())
+  batchId   String
+  userId    String
+  createdAt DateTime @default(now())
+
+  batch Batch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([batchId, userId])
 }
 
 // ============================================

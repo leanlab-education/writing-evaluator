@@ -21,6 +21,7 @@ import {
   Clock,
   Loader2,
   AlertTriangle,
+  ArrowLeft,
 } from 'lucide-react'
 import { NavHeader } from '@/components/nav-header'
 
@@ -41,6 +42,8 @@ interface RubricDimension {
 
 interface FeedbackItem {
   id: string
+  activityId: string | null
+  promptType: string | null
   studentResponse: string
   feedbackText: string
   displayOrder: number | null
@@ -55,7 +58,6 @@ interface ProjectData {
 interface DimensionScore {
   dimensionId: string
   value: number | null
-  rationale: string
 }
 
 interface ItemScoreState {
@@ -68,7 +70,6 @@ interface ItemScoreState {
 interface ExistingScore {
   dimensionId: string
   value: number
-  rationale: string | null
   notes: string | null
 }
 
@@ -120,9 +121,11 @@ function getSelectedScoreColor(
 export function EvaluateClient({
   projectId,
   userName,
+  batchId,
 }: {
   projectId: string
   userName: string
+  batchId?: string
 }) {
   const router = useRouter()
 
@@ -140,12 +143,18 @@ export function EvaluateClient({
     {}
   )
 
-  // UI toggles
-  const [showRationale, setShowRationale] = useState(false)
+  // UI & saving
   const [saving, setSaving] = useState(false)
+  const [saveStatus, setSaveStatus] = useState<
+    'idle' | 'saving' | 'saved' | 'error'
+  >('idle')
 
   // Timing
   const interactedRef = useRef(false)
+
+  // Auto-save
+  const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const lastSavedRef = useRef<string>('') // JSON snapshot to detect changes
 
   // ---------------------------------------------------------------------------
   // Fetch data
@@ -156,9 +165,13 @@ export function EvaluateClient({
       setLoading(true)
       setError(null)
 
+      const itemsUrl = batchId
+        ? `/api/feedback-items?projectId=${projectId}&batchId=${batchId}`
+        : `/api/feedback-items?projectId=${projectId}`
+
       const [projectRes, itemsRes] = await Promise.all([
         fetch(`/api/projects/${projectId}`),
-        fetch(`/api/feedback-items?projectId=${projectId}`),
+        fetch(itemsUrl),
       ])
 
       if (!projectRes.ok) {
@@ -196,7 +209,6 @@ export function EvaluateClient({
           scores: projectData.rubric.map((dim) => ({
             dimensionId: dim.id,
             value: null,
-            rationale: '',
           })),
           notes: '',
           startedAt: null,
@@ -224,7 +236,6 @@ export function EvaluateClient({
                 )
                 if (dimScore) {
                   dimScore.value = existing.value
-                  dimScore.rationale = existing.rationale ?? ''
                 }
                 // Use notes from first score entry (they share notes)
                 if (existing.notes) {
@@ -249,7 +260,7 @@ export function EvaluateClient({
     } finally {
       setLoading(false)
     }
-  }, [projectId])
+  }, [projectId, batchId])
 
   useEffect(() => {
     fetchData()
@@ -276,6 +287,72 @@ export function EvaluateClient({
 
   const allDimensionsScored =
     currentScoreState?.scores.every((s) => s.value !== null) ?? false
+
+  // ---------------------------------------------------------------------------
+  // Auto-save: debounced 1s after any score or notes change
+  // ---------------------------------------------------------------------------
+
+  useEffect(() => {
+    if (!currentItem || !currentScoreState) return
+
+    // Build a snapshot of the current state
+    const snapshot = JSON.stringify({
+      scores: currentScoreState.scores,
+      notes: currentScoreState.notes,
+    })
+
+    // Skip if nothing changed or no scores set yet
+    const hasAnyScore = currentScoreState.scores.some((s) => s.value !== null)
+    if (!hasAnyScore || snapshot === lastSavedRef.current) return
+
+    // Clear any pending timer
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current)
+    }
+
+    setSaveStatus('idle')
+
+    autoSaveTimerRef.current = setTimeout(async () => {
+      setSaveStatus('saving')
+      try {
+        const scoresToSave = currentScoreState.scores
+          .filter((s) => s.value !== null)
+          .map((s) => ({ dimensionId: s.dimensionId, value: s.value! }))
+
+        const res = await fetch('/api/scores', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            feedbackItemId: currentItem.id,
+            scores: scoresToSave,
+            notes: currentScoreState.notes || undefined,
+            startedAt: currentScoreState.startedAt || undefined,
+          }),
+        })
+
+        if (res.ok) {
+          lastSavedRef.current = snapshot
+          setSaveStatus('saved')
+        } else {
+          setSaveStatus('error')
+        }
+      } catch {
+        setSaveStatus('error')
+      }
+    }, 1000)
+
+    return () => {
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current)
+      }
+    }
+  }, [currentItem, currentScoreState])
+
+  // Reset save status when navigating to a new item
+  useEffect(() => {
+    setSaveStatus('idle')
+    lastSavedRef.current = ''
+  }, [currentIndex])
 
   // ---------------------------------------------------------------------------
   // Score handlers
@@ -308,19 +385,6 @@ export function EvaluateClient({
     }))
   }
 
-  function handleRationaleChange(dimensionId: string, rationale: string) {
-    if (!currentItem) return
-    setItemScores((prev) => ({
-      ...prev,
-      [currentItem.id]: {
-        ...prev[currentItem.id],
-        scores: prev[currentItem.id].scores.map((s) =>
-          s.dimensionId === dimensionId ? { ...s, rationale } : s
-        ),
-      },
-    }))
-  }
-
   function handleNotesChange(notes: string) {
     if (!currentItem) return
     setItemScores((prev) => ({
@@ -333,11 +397,17 @@ export function EvaluateClient({
   }
 
   // ---------------------------------------------------------------------------
-  // Save
+  // Save & Continue
   // ---------------------------------------------------------------------------
 
-  async function handleSave() {
+  async function handleContinue() {
     if (!currentItem || !currentScoreState || !allDimensionsScored) return
+
+    // Cancel any pending auto-save
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current)
+      autoSaveTimerRef.current = null
+    }
 
     setSaving(true)
     try {
@@ -346,24 +416,21 @@ export function EvaluateClient({
         (Date.now() - new Date(startedAt).getTime()) / 1000
       )
 
-      const payload = {
-        feedbackItemId: currentItem.id,
-        scores: currentScoreState.scores
-          .filter((s) => s.value !== null)
-          .map((s) => ({
-            dimensionId: s.dimensionId,
-            value: s.value!,
-            rationale: s.rationale || undefined,
-          })),
-        notes: currentScoreState.notes || undefined,
-        startedAt,
-        durationSeconds,
-      }
-
+      // Force-save via PUT (upsert) with timing data
       const res = await fetch('/api/scores', {
-        method: 'POST',
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          feedbackItemId: currentItem.id,
+          scores: currentScoreState.scores
+            .filter((s) => s.value !== null)
+            .map((s) => ({
+              dimensionId: s.dimensionId,
+              value: s.value!,
+            })),
+          notes: currentScoreState.notes || undefined,
+          startedAt,
+        }),
       })
 
       if (!res.ok) {
@@ -379,6 +446,8 @@ export function EvaluateClient({
           saved: true,
         },
       }))
+
+      setSaveStatus('saved')
 
       // Auto-advance to next unscored item
       const nextUnscoredIndex = items.findIndex(
@@ -514,6 +583,14 @@ export function EvaluateClient({
         <div className="mx-auto flex max-w-7xl flex-col gap-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                onClick={() => router.push('/')}
+                title="Back to Dashboard"
+              >
+                <ArrowLeft className="size-4" />
+              </Button>
               <h1 className="text-lg font-semibold text-foreground">
                 {project.name}
               </h1>
@@ -578,8 +655,24 @@ export function EvaluateClient({
 
       {/* Split pane: left (content) + right (rubric) */}
       <main className="mx-auto flex w-full max-w-7xl flex-1 gap-6 p-4 lg:p-6">
-        {/* Left column: student response + feedback */}
+        {/* Left column: activity + student response + feedback */}
         <div className="flex w-full flex-col gap-4 lg:w-1/2">
+          {currentItem?.activityId && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardDescription>Activity</CardDescription>
+                <CardTitle className="text-base">
+                  Activity {currentItem.activityId}
+                  {currentItem.promptType && (
+                    <span className="ml-2 text-sm font-normal text-muted-foreground">
+                      ({currentItem.promptType})
+                    </span>
+                  )}
+                </CardTitle>
+              </CardHeader>
+            </Card>
+          )}
+
           <Card className="border-content-student-border bg-content-student-bg">
             <CardHeader>
               <CardTitle className="text-content-student-text">Student Response</CardTitle>
@@ -612,19 +705,10 @@ export function EvaluateClient({
         <div className="flex w-full flex-col gap-4 lg:w-1/2">
           <Card>
             <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle>Score This Feedback</CardTitle>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setShowRationale((v) => !v)}
-                >
-                  {showRationale ? 'Hide' : 'Show'} Rationale Fields
-                </Button>
-              </div>
+              <CardTitle>Score This Feedback</CardTitle>
               <CardDescription>
                 Rate each dimension below. All dimensions must be scored before
-                saving.
+                continuing.
               </CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-6">
@@ -634,10 +718,6 @@ export function EvaluateClient({
                   currentScoreState?.scores.find(
                     (s) => s.dimensionId === dim.id
                   )?.value ?? null
-                const currentRationale =
-                  currentScoreState?.scores.find(
-                    (s) => s.dimensionId === dim.id
-                  )?.rationale ?? ''
 
                 const scaleOptions: number[] = []
                 for (let v = dim.scaleMin; v <= dim.scaleMax; v++) {
@@ -692,17 +772,6 @@ export function EvaluateClient({
                       </p>
                     )}
 
-                    {showRationale && (
-                      <Textarea
-                        placeholder={`Rationale for ${dim.label} score...`}
-                        value={currentRationale}
-                        onChange={(e) =>
-                          handleRationaleChange(dim.id, e.target.value)
-                        }
-                        className="mt-1 text-sm"
-                        rows={2}
-                      />
-                    )}
                   </div>
                 )
               })}
@@ -721,23 +790,47 @@ export function EvaluateClient({
                 />
               </div>
 
-              {/* Timing indicator */}
-              {currentScoreState?.startedAt && (
-                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <Clock className="size-3" />
-                  <span>
-                    Started{' '}
-                    {new Date(currentScoreState.startedAt).toLocaleTimeString()}
-                  </span>
+              {/* Save status + timing indicator */}
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <div className="flex items-center gap-1.5">
+                  {saveStatus === 'saving' && (
+                    <>
+                      <Loader2 className="size-3 animate-spin" />
+                      <span>Saving...</span>
+                    </>
+                  )}
+                  {saveStatus === 'saved' && (
+                    <>
+                      <CheckCircle className="size-3 text-success" />
+                      <span>Saved</span>
+                    </>
+                  )}
+                  {saveStatus === 'error' && (
+                    <>
+                      <AlertTriangle className="size-3 text-destructive" />
+                      <span>Save failed</span>
+                    </>
+                  )}
                 </div>
-              )}
+                {currentScoreState?.startedAt && (
+                  <div className="flex items-center gap-1.5">
+                    <Clock className="size-3" />
+                    <span>
+                      Started{' '}
+                      {new Date(
+                        currentScoreState.startedAt
+                      ).toLocaleTimeString()}
+                    </span>
+                  </div>
+                )}
+              </div>
 
-              {/* Save button */}
+              {/* Continue button */}
               <Button
                 className="w-full"
                 size="lg"
                 disabled={!allDimensionsScored || saving}
-                onClick={handleSave}
+                onClick={handleContinue}
               >
                 {saving ? (
                   <>
@@ -750,13 +843,13 @@ export function EvaluateClient({
                     Update & Continue
                   </>
                 ) : (
-                  'Save & Continue'
+                  'Continue'
                 )}
               </Button>
 
               {!allDimensionsScored && (
                 <p className="text-center text-xs text-muted-foreground">
-                  Score all {rubric.length} dimensions to enable saving
+                  Score all {rubric.length} dimensions to continue
                 </p>
               )}
             </CardContent>

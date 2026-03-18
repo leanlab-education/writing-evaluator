@@ -14,6 +14,13 @@ import { Progress } from '@/components/ui/progress'
 import { FileText } from 'lucide-react'
 import { NavHeader } from '@/components/nav-header'
 
+interface BatchInfo {
+  id: string
+  name: string
+  itemCount: number
+  scoredCount: number
+}
+
 interface EvaluatorProject {
   id: string
   projectId: string
@@ -25,6 +32,7 @@ interface EvaluatorProject {
   }
   assignmentCount: number
   completedCount: number
+  batches: BatchInfo[]
 }
 
 export function EvaluatorDashboard({
@@ -94,29 +102,85 @@ export function EvaluatorDashboard({
                     )}
                   </CardHeader>
                   <CardContent>
-                    <div className="mb-3">
-                      <Progress value={pct} />
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-muted-foreground">
-                        {ep.completedCount} of {ep.assignmentCount} items scored
-                      </span>
-                      <Button
-                        size="sm"
-                        onClick={() =>
-                          router.push(`/evaluate/${ep.project.id}`)
-                        }
-                        disabled={
-                          ep.project.status !== 'ACTIVE' || isComplete
-                        }
-                      >
-                        {isComplete
-                          ? 'All Done'
-                          : ep.project.status === 'ACTIVE'
-                            ? 'Start Evaluating'
-                            : 'Not Active'}
-                      </Button>
-                    </div>
+                    {ep.batches.length > 0 ? (
+                      // Batch-based view
+                      <div className="space-y-3">
+                        {ep.batches.map((batch) => {
+                          const batchPct =
+                            batch.itemCount > 0
+                              ? Math.round(
+                                  (batch.scoredCount / batch.itemCount) * 100
+                                )
+                              : 0
+                          const batchComplete = batchPct === 100
+                          return (
+                            <div
+                              key={batch.id}
+                              className="flex items-center gap-3"
+                            >
+                              <div className="flex-1">
+                                <div className="mb-1 flex items-center justify-between">
+                                  <span className="text-xs font-medium">
+                                    {batch.name}
+                                  </span>
+                                  <span className="text-xs text-muted-foreground">
+                                    {batch.scoredCount}/{batch.itemCount}
+                                  </span>
+                                </div>
+                                <Progress value={batchPct} />
+                              </div>
+                              <Button
+                                size="sm"
+                                variant={batchComplete ? 'outline' : 'default'}
+                                onClick={() =>
+                                  router.push(
+                                    `/evaluate/${ep.project.id}?batchId=${batch.id}`
+                                  )
+                                }
+                                disabled={
+                                  ep.project.status !== 'ACTIVE' ||
+                                  batchComplete
+                                }
+                              >
+                                {batchComplete
+                                  ? 'Done'
+                                  : batch.scoredCount > 0
+                                    ? 'Continue'
+                                    : 'Start'}
+                              </Button>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    ) : (
+                      // Legacy per-item view
+                      <>
+                        <div className="mb-3">
+                          <Progress value={pct} />
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm text-muted-foreground">
+                            {ep.completedCount} of {ep.assignmentCount} items
+                            scored
+                          </span>
+                          <Button
+                            size="sm"
+                            onClick={() =>
+                              router.push(`/evaluate/${ep.project.id}`)
+                            }
+                            disabled={
+                              ep.project.status !== 'ACTIVE' || isComplete
+                            }
+                          >
+                            {isComplete
+                              ? 'All Done'
+                              : ep.project.status === 'ACTIVE'
+                                ? 'Start Evaluating'
+                                : 'Not Active'}
+                          </Button>
+                        </div>
+                      </>
+                    )}
                   </CardContent>
                 </Card>
               )

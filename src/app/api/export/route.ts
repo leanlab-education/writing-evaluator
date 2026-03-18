@@ -41,7 +41,7 @@ export async function GET(request: NextRequest) {
     )
   }
 
-  // Get all scores for this project
+  // Get all scores for this project with full feedback item data
   const scores = await prisma.score.findMany({
     where: {
       feedbackItem: { projectId },
@@ -51,7 +51,16 @@ export async function GET(request: NextRequest) {
       feedbackItem: {
         select: {
           feedbackId: true,
+          responseId: true,
+          studentId: true,
+          cycleId: true,
+          activityId: true,
+          promptType: true,
+          studentResponse: true,
+          feedbackText: true,
           feedbackSource: true,
+          annotatorId: true,
+          batch: { select: { name: true } },
         },
       },
       user: {
@@ -65,14 +74,25 @@ export async function GET(request: NextRequest) {
   })
 
   // Group scores by (feedbackItemId + userId) to build wide-format rows
+  let scoreCounter = 0
   const rowMap = new Map<
     string,
     {
+      scoreId: string
+      responseId: string | null
       feedbackId: string
       evaluatorEmail: string
+      cycleId: string | null
+      activityId: string | null
+      promptType: string | null
+      studentResponse: string
+      feedbackText: string
       feedbackSource: string
+      annotatorId: string | null
+      batchName: string | null
       notes: string | null
       scoredAt: Date
+      durationSeconds: number | null
       dimensionScores: Record<string, number>
     }
   >()
@@ -80,48 +100,77 @@ export async function GET(request: NextRequest) {
   for (const score of scores) {
     const rowKey = `${score.feedbackItemId}::${score.userId}`
     if (!rowMap.has(rowKey)) {
+      scoreCounter++
       rowMap.set(rowKey, {
+        scoreId: `S${String(scoreCounter).padStart(3, '0')}`,
+        responseId: score.feedbackItem.responseId,
         feedbackId: score.feedbackItem.feedbackId,
         evaluatorEmail: score.user.email,
+        cycleId: score.feedbackItem.cycleId,
+        activityId: score.feedbackItem.activityId,
+        promptType: score.feedbackItem.promptType,
+        studentResponse: score.feedbackItem.studentResponse,
+        feedbackText: score.feedbackItem.feedbackText,
         feedbackSource: score.feedbackItem.feedbackSource,
+        annotatorId: score.feedbackItem.annotatorId,
+        batchName: score.feedbackItem.batch?.name ?? null,
         notes: score.notes,
         scoredAt: score.scoredAt,
+        durationSeconds: score.durationSeconds,
         dimensionScores: {},
       })
     }
     const row = rowMap.get(rowKey)!
     row.dimensionScores[score.dimension.key] = score.value
-    // Use the latest notes if present
-    if (score.notes) {
-      row.notes = score.notes
-    }
+    if (score.notes) row.notes = score.notes
+    if (score.durationSeconds) row.durationSeconds = score.durationSeconds
   }
 
-  // Build CSV
+  // Build CSV — L3 output format
   const dimensionKeys = dimensions.map((d: { key: string }) => d.key)
   const headerRow = [
-    'feedback_ID',
-    'evaluator_email',
+    'Score_ID',
+    'Response_ID',
+    'Feedback_ID',
+    'Evaluator_ID',
+    'Cycle_ID',
+    'Activity_ID',
+    'Prompt_ID',
     ...dimensionKeys,
-    'notes',
-    'feedback_source',
-    'timestamp',
+    'Notes',
+    'Student_Text',
+    'Feedback_Text',
+    'Feedback_Source',
+    'Annotator_ID',
+    'Batch_Name',
+    'Scored_At',
+    'Duration_Seconds',
   ]
 
   const csvRows = [headerRow.join(',')]
 
   for (const row of rowMap.values()) {
     const values = [
+      csvEscape(row.scoreId),
+      csvEscape(row.responseId || ''),
       csvEscape(row.feedbackId),
       csvEscape(row.evaluatorEmail),
+      csvEscape(row.cycleId || ''),
+      csvEscape(row.activityId || ''),
+      csvEscape(row.promptType || ''),
       ...dimensionKeys.map((key: string) =>
         row.dimensionScores[key] !== undefined
           ? String(row.dimensionScores[key])
           : ''
       ),
       csvEscape(row.notes || ''),
+      csvEscape(row.studentResponse),
+      csvEscape(row.feedbackText),
       row.feedbackSource,
+      csvEscape(row.annotatorId || ''),
+      csvEscape(row.batchName || ''),
       row.scoredAt.toISOString(),
+      row.durationSeconds ? String(row.durationSeconds) : '',
     ]
     csvRows.push(values.join(','))
   }

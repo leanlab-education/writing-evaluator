@@ -96,13 +96,16 @@ export function ImportClient({ projectId }: { projectId: string }) {
         body: JSON.stringify({
           projectId,
           items: rows.map((row) => ({
-            cycleId: row.cycle_ID || null,
-            studentId: row.student_ID,
-            studentResponse: row.student_response,
-            feedbackId: row.feedback_ID,
-            annotatorId: row.annotator_ID || null,
-            feedbackText: row.feedback_text,
-            feedbackSource: row.feedback_source || 'AI',
+            responseId: row.Response_ID || null,
+            cycleId: row.Cycle_ID || null,
+            studentId: row.Student_ID,
+            activityId: row.Activity_ID || null,
+            promptType: row.Prompt_ID || null,
+            studentResponse: row.Student_Text,
+            feedbackId: row.Feedback_ID,
+            annotatorId: row.Annotator_ID || null,
+            feedbackText: row.Feedback_Text,
+            feedbackSource: row.Feedback_Source || 'AI',
           })),
         }),
       })
@@ -206,8 +209,9 @@ export function ImportClient({ projectId }: { projectId: string }) {
                   : 'Drop a CSV file here or click to browse'}
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
-                Expected columns: cycle_ID, student_ID, student_response,
-                feedback_ID, annotator_ID, feedback_text, feedback_source
+                Expected columns: Response_ID, Student_ID, Cycle_ID,
+                Activity_ID, Prompt_ID, Student_Text, Feedback_ID,
+                Feedback_Source, Annotator_ID, Feedback_Text
               </p>
             </div>
 
@@ -271,14 +275,15 @@ export function ImportClient({ projectId }: { projectId: string }) {
                     <TableHeader>
                       <TableRow>
                         <TableHead className="w-12">#</TableHead>
-                        <TableHead>feedback_ID</TableHead>
-                        <TableHead>student_ID</TableHead>
-                        <TableHead>feedback_source</TableHead>
+                        <TableHead>Response_ID</TableHead>
+                        <TableHead>Activity_ID</TableHead>
+                        <TableHead>Prompt_ID</TableHead>
+                        <TableHead>Feedback_Source</TableHead>
                         <TableHead className="max-w-[200px]">
-                          feedback_text
+                          Student_Text
                         </TableHead>
                         <TableHead className="max-w-[200px]">
-                          student_response
+                          Feedback_Text
                         </TableHead>
                       </TableRow>
                     </TableHeader>
@@ -289,17 +294,20 @@ export function ImportClient({ projectId }: { projectId: string }) {
                             {i + 1}
                           </TableCell>
                           <TableCell className="font-mono text-xs">
-                            {row.feedback_ID}
+                            {row.Response_ID}
                           </TableCell>
                           <TableCell className="font-mono text-xs">
-                            {row.student_ID}
+                            {row.Activity_ID}
                           </TableCell>
-                          <TableCell>{row.feedback_source}</TableCell>
+                          <TableCell className="font-mono text-xs">
+                            {row.Prompt_ID}
+                          </TableCell>
+                          <TableCell>{row.Feedback_Source}</TableCell>
                           <TableCell className="max-w-[200px] truncate">
-                            {row.feedback_text}
+                            {row.Student_Text}
                           </TableCell>
                           <TableCell className="max-w-[200px] truncate">
-                            {row.student_response}
+                            {row.Feedback_Text}
                           </TableCell>
                         </TableRow>
                       ))}
