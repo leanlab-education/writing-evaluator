@@ -42,6 +42,7 @@ import {
   CheckCircle,
   Layers,
   Settings2,
+  Eye,
 } from 'lucide-react'
 import { NavHeader } from '@/components/nav-header'
 import { statusColors } from '@/lib/status-colors'
@@ -520,6 +521,18 @@ export function ProjectDetailClient({
                 <Upload className="mr-2 h-4 w-4" />
                 Import Data
               </Button>
+
+              {totalItems > 0 && (
+                <Button
+                  variant="outline"
+                  onClick={() =>
+                    router.push(`/evaluate/${projectId}`)
+                  }
+                >
+                  <Eye className="mr-2 h-4 w-4" />
+                  Preview Evaluator View
+                </Button>
+              )}
 
               {statusFlow[project.status] && (
                 <Button
