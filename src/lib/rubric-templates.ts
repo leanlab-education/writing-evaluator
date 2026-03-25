@@ -12,113 +12,99 @@ export interface RubricDimensionTemplate {
 
 export const DEFAULT_RUBRIC: RubricDimensionTemplate[] = [
   {
-    key: 'affective_support',
-    label: 'Affective Support',
-    description:
-      'Encourages and/or addresses the emotional needs of the learner.',
+    key: 'criterion_1',
+    label: 'Criterion 1',
+    description: '',
     scaleMin: 1,
     scaleMax: 3,
     scoreLabels: {
-      1: {
-        label: 'Not Present',
-        description: 'Negative, discouraging, dismissive, or absent.',
-      },
-      2: {
-        label: 'Unclear',
-        description: 'Neutral or inconsistent encouragement.',
-      },
-      3: {
-        label: 'Present',
-        description: 'Supportive; acknowledges strengths and effort.',
-      },
+      1: { label: 'Not Present', description: '' },
+      2: { label: 'Unclear', description: '' },
+      3: { label: 'Present', description: '' },
     },
   },
   {
-    key: 'alignment',
-    label: 'Alignment',
-    description: 'Addresses the task at hand.',
+    key: 'criterion_2',
+    label: 'Criterion 2',
+    description: '',
     scaleMin: 1,
     scaleMax: 3,
     scoreLabels: {
-      1: {
-        label: 'Not Present',
-        description: 'Irrelevant or misaligned to the task.',
-      },
-      2: {
-        label: 'Unclear',
-        description: 'Vague or partially misaligned to the task.',
-      },
-      3: {
-        label: 'Present',
-        description: 'Relevant, and aligned with task.',
-      },
+      1: { label: 'Not Present', description: '' },
+      2: { label: 'Unclear', description: '' },
+      3: { label: 'Present', description: '' },
     },
   },
   {
-    key: 'accuracy',
-    label: 'Accuracy',
-    description: 'The feedback is factually correct.',
+    key: 'criterion_3',
+    label: 'Criterion 3',
+    description: '',
     scaleMin: 1,
     scaleMax: 3,
     scoreLabels: {
-      1: {
-        label: 'Not Present',
-        description: 'Incorrect or misleading.',
-      },
-      2: {
-        label: 'Unclear',
-        description: 'Some correct elements, but not all.',
-      },
-      3: {
-        label: 'Present',
-        description: 'Accurate / factually correct.',
-      },
+      1: { label: 'Not Present', description: '' },
+      2: { label: 'Unclear', description: '' },
+      3: { label: 'Present', description: '' },
     },
   },
   {
-    key: 'clarity',
-    label: 'Clarity',
-    description: 'It makes sense.',
+    key: 'criterion_4',
+    label: 'Criterion 4',
+    description: '',
     scaleMin: 1,
     scaleMax: 3,
     scoreLabels: {
-      1: {
-        label: 'Not Present',
-        description: 'Confusing, ambiguous, or overly technical.',
-      },
-      2: {
-        label: 'Unclear',
-        description: 'Some clarity, but possible misunderstandings.',
-      },
-      3: {
-        label: 'Present',
-        description: 'Clear and accessible to the learner.',
-      },
+      1: { label: 'Not Present', description: '' },
+      2: { label: 'Unclear', description: '' },
+      3: { label: 'Present', description: '' },
     },
   },
   {
-    key: 'scaffolding',
-    label: 'Scaffolding / Cognitive Load',
-    description:
-      'Provides step-by-step guidance that is of the appropriate grain size, logically chunked, and amount for the learner to respond to the task.',
+    key: 'criterion_5',
+    label: 'Criterion 5',
+    description: '',
     scaleMin: 1,
     scaleMax: 3,
     scoreLabels: {
-      1: {
-        label: 'Not Present',
-        description:
-          'Only evaluative ("right/wrong"); no guidance; too much guidance/reveals answers.',
-      },
-      2: {
-        label: 'Unclear',
-        description:
-          'Vague or generic suggestions. Some useful info, but underdeveloped or cluttered.',
-      },
-      3: {
-        label: 'Present',
-        description:
-          'Clear, specific steps to progress. Balanced; enough info without overload.',
-      },
+      1: { label: 'Not Present', description: '' },
+      2: { label: 'Unclear', description: '' },
+      3: { label: 'Present', description: '' },
+    },
+  },
+  {
+    key: 'criterion_6',
+    label: 'Criterion 6',
+    description: '',
+    scaleMin: 1,
+    scaleMax: 3,
+    scoreLabels: {
+      1: { label: 'Not Present', description: '' },
+      2: { label: 'Unclear', description: '' },
+      3: { label: 'Present', description: '' },
+    },
+  },
+  {
+    key: 'criterion_7',
+    label: 'Criterion 7',
+    description: '',
+    scaleMin: 1,
+    scaleMax: 3,
+    scoreLabels: {
+      1: { label: 'Not Present', description: '' },
+      2: { label: 'Unclear', description: '' },
+      3: { label: 'Present', description: '' },
+    },
+  },
+  {
+    key: 'criterion_8',
+    label: 'Criterion 8',
+    description: '',
+    scaleMin: 1,
+    scaleMax: 3,
+    scoreLabels: {
+      1: { label: 'Not Present', description: '' },
+      2: { label: 'Unclear', description: '' },
+      3: { label: 'Present', description: '' },
     },
   },
 ]

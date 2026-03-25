@@ -123,37 +123,56 @@ export async function PUT(request: Request) {
     )
   }
 
-  // Upsert each score dimension
+  // Upsert each score dimension — run sequentially to avoid race conditions
   if (Array.isArray(scores) && scores.length > 0) {
-    await Promise.all(
-      scores.map(
-        (score: { dimensionId: string; value: number }) =>
-          prisma.score.upsert({
-            where: {
-              feedbackItemId_userId_dimensionId_isReconciled: {
-                feedbackItemId,
-                userId: session.user.id,
-                dimensionId: score.dimensionId,
-                isReconciled: false,
-              },
+    for (const score of scores as { dimensionId: string; value: number }[]) {
+      try {
+        await prisma.score.upsert({
+          where: {
+            feedbackItemId_userId_dimensionId_isReconciled: {
+              feedbackItemId,
+              userId: session.user.id,
+              dimensionId: score.dimensionId,
+              isReconciled: false,
             },
-            update: {
+          },
+          update: {
+            value: score.value,
+            scoredAt: new Date(),
+            ...(notes !== undefined ? { notes } : {}),
+            ...(startedAt ? { startedAt: new Date(startedAt) } : {}),
+          },
+          create: {
+            feedbackItemId,
+            userId: session.user.id,
+            dimensionId: score.dimensionId,
+            value: score.value,
+            notes: notes || null,
+            startedAt: startedAt ? new Date(startedAt) : null,
+          },
+        })
+      } catch (e: unknown) {
+        // P2002: concurrent request already inserted this row — fall back to update
+        if ((e as { code?: string }).code === 'P2002') {
+          await prisma.score.updateMany({
+            where: {
+              feedbackItemId,
+              userId: session.user.id,
+              dimensionId: score.dimensionId,
+              isReconciled: false,
+            },
+            data: {
               value: score.value,
               scoredAt: new Date(),
               ...(notes !== undefined ? { notes } : {}),
               ...(startedAt ? { startedAt: new Date(startedAt) } : {}),
             },
-            create: {
-              feedbackItemId,
-              userId: session.user.id,
-              dimensionId: score.dimensionId,
-              value: score.value,
-              notes: notes || null,
-              startedAt: startedAt ? new Date(startedAt) : null,
-            },
           })
-      )
-    )
+        } else {
+          throw e
+        }
+      }
+    }
   }
 
   // If only notes changed (no scores), update notes on existing scores

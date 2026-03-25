@@ -50,17 +50,18 @@ export async function GET(request: NextRequest) {
     include: {
       feedbackItem: {
         select: {
-          feedbackId: true,
           responseId: true,
           studentId: true,
           cycleId: true,
           activityId: true,
-          promptType: true,
-          studentResponse: true,
-          feedbackText: true,
+          conjunctionId: true,
+          studentText: true,
           feedbackSource: true,
-          annotatorId: true,
-          batch: { select: { name: true } },
+          teacherId: true,
+          feedbackText: true,
+          optimal: true,
+          feedbackType: true,
+          feedbackId: true,
         },
       },
       user: {
@@ -80,19 +81,18 @@ export async function GET(request: NextRequest) {
     {
       scoreId: string
       responseId: string | null
-      feedbackId: string
-      evaluatorEmail: string
+      studentId: string
       cycleId: string | null
       activityId: string | null
-      promptType: string | null
-      studentResponse: string
-      feedbackText: string
+      conjunctionId: string | null
+      studentText: string
       feedbackSource: string
-      annotatorId: string | null
-      batchName: string | null
-      notes: string | null
-      scoredAt: Date
-      durationSeconds: number | null
+      teacherId: string | null
+      feedbackText: string
+      optimal: string | null
+      feedbackType: string | null
+      feedbackId: string
+      evaluatorEmail: string
       dimensionScores: Record<string, number>
     }
   >()
@@ -104,73 +104,70 @@ export async function GET(request: NextRequest) {
       rowMap.set(rowKey, {
         scoreId: `S${String(scoreCounter).padStart(3, '0')}`,
         responseId: score.feedbackItem.responseId,
-        feedbackId: score.feedbackItem.feedbackId,
-        evaluatorEmail: score.user.email,
+        studentId: score.feedbackItem.studentId,
         cycleId: score.feedbackItem.cycleId,
         activityId: score.feedbackItem.activityId,
-        promptType: score.feedbackItem.promptType,
-        studentResponse: score.feedbackItem.studentResponse,
-        feedbackText: score.feedbackItem.feedbackText,
+        conjunctionId: score.feedbackItem.conjunctionId,
+        studentText: score.feedbackItem.studentText,
         feedbackSource: score.feedbackItem.feedbackSource,
-        annotatorId: score.feedbackItem.annotatorId,
-        batchName: score.feedbackItem.batch?.name ?? null,
-        notes: score.notes,
-        scoredAt: score.scoredAt,
-        durationSeconds: score.durationSeconds,
+        teacherId: score.feedbackItem.teacherId,
+        feedbackText: score.feedbackItem.feedbackText,
+        optimal: score.feedbackItem.optimal,
+        feedbackType: score.feedbackItem.feedbackType,
+        feedbackId: score.feedbackItem.feedbackId,
+        evaluatorEmail: score.user.email,
         dimensionScores: {},
       })
     }
     const row = rowMap.get(rowKey)!
     row.dimensionScores[score.dimension.key] = score.value
-    if (score.notes) row.notes = score.notes
-    if (score.durationSeconds) row.durationSeconds = score.durationSeconds
   }
 
-  // Build CSV — L3 output format
-  const dimensionKeys = dimensions.map((d: { key: string }) => d.key)
+  // Build CSV — new output format: input columns + Score_ID, Evaluator_ID, criteria
+  const dimensionKeys = dimensions.map((d) => d.key)
+  const dimensionLabels = dimensions.map((d) => d.label)
+
   const headerRow = [
-    'Score_ID',
     'Response_ID',
-    'Feedback_ID',
-    'Evaluator_ID',
+    'Student_ID',
     'Cycle_ID',
     'Activity_ID',
-    'Prompt_ID',
-    ...dimensionKeys,
-    'Notes',
+    'Conjunction_ID',
     'Student_Text',
-    'Feedback_Text',
     'Feedback_Source',
-    'Annotator_ID',
-    'Batch_Name',
-    'Scored_At',
-    'Duration_Seconds',
+    'Teacher_ID',
+    'Feedback_Text',
+    'optimal',
+    'feedback_type',
+    'Feedback_ID',
+    'Score_ID',
+    'Evaluator_Email',
+    ...dimensionLabels,
   ]
 
   const csvRows = [headerRow.join(',')]
 
   for (const row of rowMap.values()) {
     const values = [
-      csvEscape(row.scoreId),
       csvEscape(row.responseId || ''),
-      csvEscape(row.feedbackId),
-      csvEscape(row.evaluatorEmail),
+      csvEscape(row.studentId),
       csvEscape(row.cycleId || ''),
       csvEscape(row.activityId || ''),
-      csvEscape(row.promptType || ''),
-      ...dimensionKeys.map((key: string) =>
+      csvEscape(row.conjunctionId || ''),
+      csvEscape(row.studentText),
+      row.feedbackSource,
+      csvEscape(row.teacherId || ''),
+      csvEscape(row.feedbackText),
+      csvEscape(row.optimal || ''),
+      csvEscape(row.feedbackType || ''),
+      csvEscape(row.feedbackId),
+      csvEscape(row.scoreId),
+      csvEscape(row.evaluatorEmail),
+      ...dimensionKeys.map((key) =>
         row.dimensionScores[key] !== undefined
           ? String(row.dimensionScores[key])
           : ''
       ),
-      csvEscape(row.notes || ''),
-      csvEscape(row.studentResponse),
-      csvEscape(row.feedbackText),
-      row.feedbackSource,
-      csvEscape(row.annotatorId || ''),
-      csvEscape(row.batchName || ''),
-      row.scoredAt.toISOString(),
-      row.durationSeconds ? String(row.durationSeconds) : '',
     ]
     csvRows.push(values.join(','))
   }

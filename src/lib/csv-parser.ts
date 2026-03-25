@@ -1,51 +1,59 @@
 // Parse CSV text with quote-aware field splitting
 // Handles: quoted fields, commas inside quotes, escaped quotes
 
-// New 10-column Input_TEST format (from Quill data pipeline)
 export interface FeedbackCSVRow {
   Response_ID: string
   Student_ID: string
   Cycle_ID: string
   Activity_ID: string
-  Prompt_ID: string
+  Conjunction_ID: string
   Student_Text: string
-  Feedback_ID: string
   Feedback_Source: string // "AI" or "HUMAN"
-  Annotator_ID: string
+  Teacher_ID: string
   Feedback_Text: string
+  optimal: string
+  feedback_type: string
+  Feedback_ID: string
 }
 
-// Column name mapping — supports both new (Input_TEST) and legacy formats
+// Column name mapping — supports both new format and legacy aliases
 const COLUMN_ALIASES: Record<string, keyof FeedbackCSVRow> = {
-  // New format (Input_TEST)
   Response_ID: 'Response_ID',
   Student_ID: 'Student_ID',
   Cycle_ID: 'Cycle_ID',
   Activity_ID: 'Activity_ID',
-  Prompt_ID: 'Prompt_ID',
+  Conjunction_ID: 'Conjunction_ID',
   Student_Text: 'Student_Text',
-  Feedback_ID: 'Feedback_ID',
   Feedback_Source: 'Feedback_Source',
-  Annotator_ID: 'Annotator_ID',
+  Teacher_ID: 'Teacher_ID',
   Feedback_Text: 'Feedback_Text',
-  // Legacy format aliases
+  optimal: 'optimal',
+  feedback_type: 'feedback_type',
+  Feedback_ID: 'Feedback_ID',
+  // Legacy aliases
   response_ID: 'Response_ID',
   student_ID: 'Student_ID',
   cycle_ID: 'Cycle_ID',
   activity_ID: 'Activity_ID',
-  prompt_ID: 'Prompt_ID',
+  Prompt_ID: 'Conjunction_ID',
+  prompt_ID: 'Conjunction_ID',
   student_response: 'Student_Text',
-  feedback_ID: 'Feedback_ID',
   feedback_source: 'Feedback_Source',
-  annotator_ID: 'Annotator_ID',
+  Annotator_ID: 'Teacher_ID',
+  annotator_ID: 'Teacher_ID',
   feedback_text: 'Feedback_Text',
+  feedback_ID: 'Feedback_ID',
 }
 
 export function parseCSV(text: string): FeedbackCSVRow[] {
-  const lines = text.split('\n').filter((line) => line.trim())
-  if (lines.length < 2) return []
+  // Normalize line endings
+  const normalized = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
 
-  const rawHeaders = parseLine(lines[0]).map((h) => h.trim())
+  // Parse all records at once — handles multi-line quoted fields
+  const records = parseRecords(normalized)
+  if (records.length < 2) return []
+
+  const rawHeaders = records[0].map((h) => h.trim())
 
   // Map raw headers to canonical names via aliases
   const mappedHeaders = rawHeaders.map(
@@ -54,8 +62,8 @@ export function parseCSV(text: string): FeedbackCSVRow[] {
 
   const rows: FeedbackCSVRow[] = []
 
-  for (let i = 1; i < lines.length; i++) {
-    const values = parseLine(lines[i])
+  for (let i = 1; i < records.length; i++) {
+    const values = records[i]
     if (values.length === 0) continue
 
     const row: Record<string, string> = {}
@@ -69,24 +77,26 @@ export function parseCSV(text: string): FeedbackCSVRow[] {
   return rows
 }
 
-function parseLine(line: string): string[] {
-  const fields: string[] = []
+// Parse entire CSV text into records, correctly handling multi-line quoted fields
+function parseRecords(text: string): string[][] {
+  const records: string[][] = []
+  let fields: string[] = []
   let current = ''
   let inQuotes = false
 
-  for (let i = 0; i < line.length; i++) {
-    const char = line[i]
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i]
 
     if (inQuotes) {
       if (char === '"') {
-        if (i + 1 < line.length && line[i + 1] === '"') {
+        if (i + 1 < text.length && text[i + 1] === '"') {
           current += '"'
           i++ // skip escaped quote
         } else {
           inQuotes = false
         }
       } else {
-        current += char
+        current += char // includes newlines inside quoted fields
       }
     } else {
       if (char === '"') {
@@ -94,14 +104,26 @@ function parseLine(line: string): string[] {
       } else if (char === ',') {
         fields.push(current)
         current = ''
+      } else if (char === '\n') {
+        fields.push(current)
+        current = ''
+        if (fields.some((f) => f.trim())) {
+          records.push(fields)
+        }
+        fields = []
       } else {
         current += char
       }
     }
   }
 
+  // Handle last field/record
   fields.push(current)
-  return fields
+  if (fields.some((f) => f.trim())) {
+    records.push(fields)
+  }
+
+  return records
 }
 
 // Validate required fields

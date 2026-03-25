@@ -61,7 +61,7 @@ npx tsx scripts/seed.ts  # Seed admin + test evaluator users
 User              — email, hashedPassword, role (ADMIN | EVALUATOR)
 Project           — name, status (SETUP → ACTIVE → RECONCILIATION → COMPLETE)
 RubricDimension   — per-project scoring criteria with configurable scales
-FeedbackItem      — imported from CSV (studentResponse, feedbackText, feedbackSource)
+FeedbackItem      — imported from CSV (studentText, feedbackText, feedbackSource, teacherId, conjunctionId, optimal, feedbackType)
 ProjectEvaluator  — M:M join between projects and evaluators
 Assignment        — which evaluator scores which items
 Score             — individual dimension scores with timing data
@@ -128,7 +128,7 @@ src/
 │   ├── auth.ts                           # Auth.js config (providers, callbacks, JWT)
 │   ├── db.ts                             # Prisma client with Neon adapter
 │   ├── csv-parser.ts                     # CSV parsing + validation for feedback item import
-│   ├── rubric-templates.ts               # Default rubric (5 dimensions from Quill spec)
+│   ├── rubric-templates.ts               # Default rubric (8 generic criteria, 1-3 scale)
 │   └── utils.ts                          # cn() helper
 ├── types/
 │   └── next-auth.d.ts                    # Augments Session type with role + id
@@ -140,8 +140,8 @@ src/
 
 ### Admin: Create Project → Import → Configure → Activate
 1. Admin creates project at `/admin` → project starts in SETUP status
-2. Admin imports CSV at `/admin/[id]/import` — CSV columns: `cycle_ID, student_ID, student_response, feedback_ID, annotator_ID, feedback_text, feedback_source`
-3. Rubric auto-created from `DEFAULT_RUBRIC` template (5 dimensions, 1-3 scale each)
+2. Admin imports CSV at `/admin/[id]/import` — CSV columns: `Response_ID, Student_ID, Cycle_ID, Activity_ID, Conjunction_ID, Student_Text, Feedback_Source, Teacher_ID, Feedback_Text, optimal, feedback_type, Feedback_ID`
+3. Rubric auto-created from `DEFAULT_RUBRIC` template (8 generic criteria, 1-3 scale each)
 4. Admin adds evaluators (existing users) and assigns all items
 5. Admin changes status to ACTIVE → evaluators can now score
 6. After scoring: RECONCILIATION → resolve discrepancies → COMPLETE → export CSV
@@ -157,19 +157,13 @@ src/
 ### Export
 - Admin exports CSV from project detail page (Export tab)
 - Export **reveals** `feedbackSource` (AI/HUMAN) — this is the unblinding step
-- Includes all scores, rationale, notes, evaluator info, and timing data
+- Output columns: all input columns in original order, then `Score_ID, Evaluator_ID, Criterion_1…Criterion_N` (dimension labels as headers)
 
-## Default Rubric (from Quill Spec)
+## Default Rubric
 
-| # | Dimension | Scale | Description |
-|---|-----------|-------|-------------|
-| 1 | Affective Support | 1-3 | Encourages / addresses emotional needs |
-| 2 | Alignment | 1-3 | Addresses the task at hand |
-| 3 | Accuracy | 1-3 | Factually correct |
-| 4 | Clarity | 1-3 | Makes sense |
-| 5 | Scaffolding / Cognitive Load | 1-3 | Step-by-step guidance, appropriate grain size |
-
-Score labels: 1 = Not Present, 2 = Unclear, 3 = Present (with descriptions per dimension)
+8 generic criteria (`Criterion 1` through `Criterion 8`), all 1-3 scale.
+Score labels: 1 = Not Present, 2 = Unclear, 3 = Present.
+Criteria may be renamed to project-specific names via the Rubric tab.
 
 ## Design System
 

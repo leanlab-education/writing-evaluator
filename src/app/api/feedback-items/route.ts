@@ -33,10 +33,10 @@ export async function GET(request: NextRequest) {
       cycleId: true,
       studentId: true,
       activityId: true,
-      promptType: true,
-      studentResponse: true,
+      conjunctionId: true,
+      studentText: true,
       feedbackId: true,
-      // annotatorId intentionally excluded — blinded
+      // teacherId intentionally excluded — blinded
       feedbackText: true,
       batchId: true,
       displayOrder: true,
@@ -96,12 +96,14 @@ export async function POST(request: Request) {
         cycleId?: string
         studentId: string
         activityId?: string
-        promptType?: string
-        studentResponse: string
+        conjunctionId?: string
+        studentText: string
         feedbackId: string
-        annotatorId?: string
+        teacherId?: string
         feedbackText: string
         feedbackSource: string
+        optimal?: string
+        feedbackType?: string
       },
       index: number
     ) => ({
@@ -110,12 +112,14 @@ export async function POST(request: Request) {
       cycleId: item.cycleId || null,
       studentId: item.studentId,
       activityId: item.activityId || null,
-      promptType: item.promptType || null,
-      studentResponse: item.studentResponse,
+      conjunctionId: item.conjunctionId || null,
+      studentText: item.studentText,
       feedbackId: item.feedbackId,
-      annotatorId: item.annotatorId || null,
+      teacherId: item.teacherId || null,
       feedbackText: item.feedbackText,
       feedbackSource: item.feedbackSource.toUpperCase() as FeedbackSource,
+      optimal: item.optimal || null,
+      feedbackType: item.feedbackType || null,
       displayOrder: index,
     })
   )

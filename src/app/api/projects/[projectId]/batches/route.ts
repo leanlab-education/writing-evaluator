@@ -27,44 +27,39 @@ export async function GET(
     orderBy: { sortOrder: 'asc' },
   })
 
-  // For each batch, count how many items are fully scored
+  // Fetch dimension count once — same for all batches in this project
+  const dimensionCount = await prisma.rubricDimension.count({
+    where: { projectId },
+  })
+
+  // For each batch, count scored items with a single groupBy query (no per-item loop)
   const batchesWithStats = await Promise.all(
     batches.map(async (batch) => {
-      // Get rubric dimension count for this project
-      const dimensionCount = await prisma.rubricDimension.count({
-        where: { projectId },
-      })
-
-      // Count items that have all dimensions scored (by any evaluator)
-      const itemIds = await prisma.feedbackItem.findMany({
-        where: { batchId: batch.id },
-        select: { id: true },
-      })
-
       let scoredItemCount = 0
-      if (dimensionCount > 0 && itemIds.length > 0) {
-        // For each item, check if any evaluator has scored all dimensions
-        for (const item of itemIds) {
-          const scoreCount = await prisma.score.groupBy({
-            by: ['userId'],
-            where: {
-              feedbackItemId: item.id,
-              isReconciled: false,
-            },
-            _count: { id: true },
-            having: {
-              id: { _count: { gte: dimensionCount } },
-            },
-          })
-          if (scoreCount.length > 0) scoredItemCount++
-        }
+
+      if (dimensionCount > 0 && batch._count.feedbackItems > 0) {
+        // Find (feedbackItemId, userId) pairs that have scored all dimensions
+        const fullyScoredPairs = await prisma.score.groupBy({
+          by: ['feedbackItemId', 'userId'],
+          where: {
+            feedbackItem: { batchId: batch.id },
+            isReconciled: false,
+          },
+          _count: { dimensionId: true },
+          having: {
+            dimensionId: { _count: { gte: dimensionCount } },
+          },
+        })
+        // Count unique items that have at least one evaluator who scored all dimensions
+        scoredItemCount = new Set(fullyScoredPairs.map((p) => p.feedbackItemId))
+          .size
       }
 
       return {
         id: batch.id,
         name: batch.name,
         activityId: batch.activityId,
-        promptType: batch.promptType,
+        conjunctionId: batch.conjunctionId,
         size: batch.size,
         sortOrder: batch.sortOrder,
         createdAt: batch.createdAt,
@@ -79,7 +74,7 @@ export async function GET(
 }
 
 // POST /api/projects/[projectId]/batches — create batches
-// mode: "auto" groups unassigned items by activityId + promptType
+// mode: "auto" groups unassigned items by activityId + conjunctionId (Conjunction_ID from CSV)
 // mode: "manual" creates a single batch with specified name
 export async function POST(
   request: Request,
@@ -111,10 +106,10 @@ export async function POST(
       )
     }
 
-    // Group by activityId + promptType
+    // Group by activityId + conjunctionId
     const groups = new Map<string, typeof unbatchedItems>()
     for (const item of unbatchedItems) {
-      const key = `${item.activityId ?? 'unknown'}::${item.promptType ?? 'unknown'}`
+      const key = `${item.activityId ?? 'unknown'}::${item.conjunctionId ?? 'unknown'}`
       if (!groups.has(key)) groups.set(key, [])
       groups.get(key)!.push(item)
     }
@@ -124,7 +119,7 @@ export async function POST(
     let sortOrder = await prisma.batch.count({ where: { projectId } })
 
     for (const [key, groupItems] of groups) {
-      const [activityId, promptType] = key.split('::')
+      const [activityId, conjunctionId] = key.split('::')
       const chunks: (typeof groupItems)[] = []
 
       for (let i = 0; i < groupItems.length; i += batchSize) {
@@ -135,15 +130,15 @@ export async function POST(
         const chunk = chunks[chunkIdx]
         const batchName =
           chunks.length > 1
-            ? `Activity ${activityId} - ${promptType} - Batch ${chunkIdx + 1}`
-            : `Activity ${activityId} - ${promptType}`
+            ? `Activity ${activityId} - ${conjunctionId} - Batch ${chunkIdx + 1}`
+            : `Activity ${activityId} - ${conjunctionId}`
 
         const batch = await prisma.batch.create({
           data: {
             projectId,
             name: batchName,
             activityId: activityId === 'unknown' ? null : activityId,
-            promptType: promptType === 'unknown' ? null : promptType,
+            conjunctionId: conjunctionId === 'unknown' ? null : conjunctionId,
             size: batchSize,
             sortOrder: sortOrder++,
           },
@@ -184,7 +179,7 @@ export async function POST(
       projectId,
       name,
       activityId: body.activityId || null,
-      promptType: body.promptType || null,
+      conjunctionId: body.conjunctionId || null,
       size: batchSize,
       sortOrder,
     },

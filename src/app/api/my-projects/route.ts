@@ -83,14 +83,26 @@ export async function GET() {
     })
   }
 
-  const result = evaluatorProjects.map((ep) => ({
-    id: ep.id,
-    projectId: ep.projectId,
-    project: ep.project,
-    assignmentCount: ep._count.assignments,
-    completedCount: completedMap.get(ep.id) || 0,
-    batches: batchesByProject.get(ep.projectId) || [],
-  }))
+  const result = evaluatorProjects.map((ep) => {
+    const batches = batchesByProject.get(ep.projectId) || []
+    // In batch mode, derive totals from batch sums; fall back to Assignment table
+    const assignmentCount =
+      batches.length > 0
+        ? batches.reduce((sum, b) => sum + b.itemCount, 0)
+        : ep._count.assignments
+    const completedCount =
+      batches.length > 0
+        ? batches.reduce((sum, b) => sum + b.scoredCount, 0)
+        : completedMap.get(ep.id) || 0
+    return {
+      id: ep.id,
+      projectId: ep.projectId,
+      project: ep.project,
+      assignmentCount,
+      completedCount,
+      batches,
+    }
+  })
 
   return NextResponse.json(result)
 }

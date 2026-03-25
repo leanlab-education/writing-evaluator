@@ -100,12 +100,14 @@ export function ImportClient({ projectId }: { projectId: string }) {
             cycleId: row.Cycle_ID || null,
             studentId: row.Student_ID,
             activityId: row.Activity_ID || null,
-            promptType: row.Prompt_ID || null,
-            studentResponse: row.Student_Text,
+            conjunctionId: row.Conjunction_ID || null,
+            studentText: row.Student_Text,
             feedbackId: row.Feedback_ID,
-            annotatorId: row.Annotator_ID || null,
+            teacherId: row.Teacher_ID || null,
             feedbackText: row.Feedback_Text,
             feedbackSource: row.Feedback_Source || 'AI',
+            optimal: row.optimal || null,
+            feedbackType: row.feedback_type || null,
           })),
         }),
       })
@@ -210,8 +212,8 @@ export function ImportClient({ projectId }: { projectId: string }) {
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
                 Expected columns: Response_ID, Student_ID, Cycle_ID,
-                Activity_ID, Prompt_ID, Student_Text, Feedback_ID,
-                Feedback_Source, Annotator_ID, Feedback_Text
+                Activity_ID, Conjunction_ID, Student_Text, Feedback_Source,
+                Teacher_ID, Feedback_Text, optimal, feedback_type, Feedback_ID
               </p>
             </div>
 
@@ -277,7 +279,7 @@ export function ImportClient({ projectId }: { projectId: string }) {
                         <TableHead className="w-12">#</TableHead>
                         <TableHead>Response_ID</TableHead>
                         <TableHead>Activity_ID</TableHead>
-                        <TableHead>Prompt_ID</TableHead>
+                        <TableHead>Conjunction_ID</TableHead>
                         <TableHead>Feedback_Source</TableHead>
                         <TableHead className="max-w-[200px]">
                           Student_Text
@@ -300,7 +302,7 @@ export function ImportClient({ projectId }: { projectId: string }) {
                             {row.Activity_ID}
                           </TableCell>
                           <TableCell className="font-mono text-xs">
-                            {row.Prompt_ID}
+                            {row.Conjunction_ID}
                           </TableCell>
                           <TableCell>{row.Feedback_Source}</TableCell>
                           <TableCell className="max-w-[200px] truncate">

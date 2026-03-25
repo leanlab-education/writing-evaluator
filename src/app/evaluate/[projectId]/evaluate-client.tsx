@@ -43,8 +43,8 @@ interface RubricDimension {
 interface FeedbackItem {
   id: string
   activityId: string | null
-  promptType: string | null
-  studentResponse: string
+  conjunctionId: string | null
+  studentText: string
   feedbackText: string
   displayOrder: number | null
 }
@@ -68,6 +68,7 @@ interface ItemScoreState {
 }
 
 interface ExistingScore {
+  feedbackItemId: string
   dimensionId: string
   value: number
   notes: string | null
@@ -86,6 +87,29 @@ function parseScoreLabels(
   } catch {
     return {}
   }
+}
+
+// Build a windowed list of indices + ellipsis markers for navigation
+// e.g. [0, '...', 44, 45, 46, 47, 48, '...', 2099]
+function buildNavWindow(
+  current: number,
+  total: number,
+  wing: number
+): (number | '...')[] {
+  if (total <= wing * 2 + 3) {
+    return Array.from({ length: total }, (_, i) => i)
+  }
+  const result: (number | '...')[] = []
+  const start = Math.max(1, current - wing)
+  const end = Math.min(total - 2, current + wing)
+
+  result.push(0)
+  if (start > 1) result.push('...')
+  for (let i = start; i <= end; i++) result.push(i)
+  if (end < total - 2) result.push('...')
+  result.push(total - 1)
+
+  return result
 }
 
 function getScoreColor(value: number, min: number, max: number): string {
@@ -155,6 +179,7 @@ export function EvaluateClient({
   // Auto-save
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null)
   const lastSavedRef = useRef<string>('') // JSON snapshot to detect changes
+  const saveInProgressRef = useRef(false) // prevent concurrent saves
 
   // ---------------------------------------------------------------------------
   // Fetch data
@@ -216,37 +241,32 @@ export function EvaluateClient({
         }
       }
 
-      // Load any existing scores from the server
+      // Load any existing scores from the server (flat array of Score records)
       try {
         const existingRes = await fetch(
           `/api/scores?projectId=${projectId}`
         )
         if (existingRes.ok) {
-          const existingScores: {
-            feedbackItemId: string
-            scores: ExistingScore[]
-          }[] = await existingRes.json()
+          const existingScores: ExistingScore[] = await existingRes.json()
 
-          for (const group of existingScores) {
-            if (initialScores[group.feedbackItemId]) {
-              const state = initialScores[group.feedbackItemId]
-              for (const existing of group.scores) {
-                const dimScore = state.scores.find(
-                  (s) => s.dimensionId === existing.dimensionId
-                )
-                if (dimScore) {
-                  dimScore.value = existing.value
-                }
-                // Use notes from first score entry (they share notes)
-                if (existing.notes) {
-                  state.notes = existing.notes
-                }
-              }
-              // Mark as saved if all dimensions have values
-              const allScored = state.scores.every((s) => s.value !== null)
-              if (allScored) {
-                state.saved = true
-              }
+          for (const existing of existingScores) {
+            const state = initialScores[existing.feedbackItemId]
+            if (!state) continue
+            const dimScore = state.scores.find(
+              (s) => s.dimensionId === existing.dimensionId
+            )
+            if (dimScore) {
+              dimScore.value = existing.value
+            }
+            if (existing.notes && !state.notes) {
+              state.notes = existing.notes
+            }
+          }
+
+          // Mark items as saved if all dimensions have values
+          for (const state of Object.values(initialScores)) {
+            if (state.scores.every((s) => s.value !== null)) {
+              state.saved = true
             }
           }
         }
@@ -313,6 +333,8 @@ export function EvaluateClient({
     setSaveStatus('idle')
 
     autoSaveTimerRef.current = setTimeout(async () => {
+      if (saveInProgressRef.current) return
+      saveInProgressRef.current = true
       setSaveStatus('saving')
       try {
         const scoresToSave = currentScoreState.scores
@@ -338,6 +360,8 @@ export function EvaluateClient({
         }
       } catch {
         setSaveStatus('error')
+      } finally {
+        saveInProgressRef.current = false
       }
     }, 1000)
 
@@ -409,7 +433,11 @@ export function EvaluateClient({
       autoSaveTimerRef.current = null
     }
 
+    // Wait for any in-progress auto-save to complete
+    if (saveInProgressRef.current) return
+
     setSaving(true)
+    saveInProgressRef.current = true
     try {
       const startedAt = currentScoreState.startedAt ?? new Date().toISOString()
       const durationSeconds = Math.round(
@@ -462,6 +490,7 @@ export function EvaluateClient({
       setError(err instanceof Error ? err.message : 'Failed to save scores')
     } finally {
       setSaving(false)
+      saveInProgressRef.current = false
     }
   }
 
@@ -619,26 +648,26 @@ export function EvaluateClient({
               <ChevronLeft className="size-4" />
             </Button>
 
-            <div className="flex flex-1 flex-wrap items-center gap-1.5 overflow-x-auto py-1">
-              {items.map((item, i) => {
-                const isCurrent = i === currentIndex
-                const isScored = itemScores[item.id]?.saved
-                return (
+            <div className="flex flex-1 items-center justify-center gap-1">
+              {buildNavWindow(currentIndex, items.length, 5).map((entry, i) =>
+                entry === '...' ? (
+                  <span key={`ellipsis-${i}`} className="px-1 text-sm text-muted-foreground">…</span>
+                ) : (
                   <button
-                    key={item.id}
-                    onClick={() => setCurrentIndex(i)}
+                    key={entry}
+                    onClick={() => setCurrentIndex(entry as number)}
                     className={`flex size-7 shrink-0 items-center justify-center rounded-full text-xs font-medium transition-all duration-200 ${
-                      isCurrent
+                      entry === currentIndex
                         ? 'bg-nav-current-bg text-nav-current-text ring-2 ring-nav-current-ring'
-                        : isScored
+                        : itemScores[items[entry as number]?.id]?.saved
                           ? 'bg-nav-scored-bg text-nav-scored-text'
                           : 'bg-nav-unscored-bg text-nav-unscored-text hover:opacity-80'
                     }`}
                   >
-                    {i + 1}
+                    {(entry as number) + 1}
                   </button>
                 )
-              })}
+              )}
             </div>
 
             <Button
@@ -663,9 +692,9 @@ export function EvaluateClient({
                 <CardDescription>Activity</CardDescription>
                 <CardTitle className="text-base">
                   Activity {currentItem.activityId}
-                  {currentItem.promptType && (
+                  {currentItem.conjunctionId && (
                     <span className="ml-2 text-sm font-normal text-muted-foreground">
-                      ({currentItem.promptType})
+                      ({currentItem.conjunctionId})
                     </span>
                   )}
                 </CardTitle>
@@ -679,7 +708,7 @@ export function EvaluateClient({
             </CardHeader>
             <CardContent>
               <div className="whitespace-pre-wrap text-sm leading-relaxed text-content-student-text/80">
-                {currentItem?.studentResponse}
+                {currentItem?.studentText}
               </div>
             </CardContent>
           </Card>

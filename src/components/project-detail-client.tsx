@@ -95,7 +95,7 @@ interface BatchRow {
   id: string
   name: string
   activityId: string | null
-  promptType: string | null
+  conjunctionId: string | null
   size: number
   sortOrder: number
   itemCount: number
@@ -109,12 +109,14 @@ interface BatchRow {
 
 const statusFlow: Record<string, string> = {
   SETUP: 'ACTIVE',
-  ACTIVE: 'COMPLETE',
+  ACTIVE: 'RECONCILIATION',
+  RECONCILIATION: 'COMPLETE',
 }
 
 const statusActionLabel: Record<string, string> = {
   SETUP: 'Start Evaluations',
-  ACTIVE: 'Mark Complete',
+  ACTIVE: 'Begin Reconciliation',
+  RECONCILIATION: 'Mark Complete',
 }
 
 // ---------------------------------------------------------------------------
@@ -758,7 +760,7 @@ export function ProjectDetailClient({
                             <CardDescription>
                               {batch.itemCount} items
                               {batch.activityId && ` \u00b7 Activity ${batch.activityId}`}
-                              {batch.promptType && ` \u00b7 ${batch.promptType}`}
+                              {batch.conjunctionId && ` \u00b7 ${batch.conjunctionId}`}
                             </CardDescription>
                           </div>
                           <Badge variant="outline">
