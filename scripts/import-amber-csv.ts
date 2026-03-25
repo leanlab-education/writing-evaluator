@@ -142,10 +142,10 @@ async function main() {
     cycleId: String(row.Cycle_ID || '') || null,
     studentId: String(row.Student_ID),
     activityId: String(row.Activity_ID || '') || null,
-    promptType: String(row.Prompt_ID || '') || null,
-    studentResponse: String(row.Student_Text),
+    conjunctionId: String(row.Prompt_ID || '') || null,
+    studentText: String(row.Student_Text),
     feedbackId: String(row.Feedback_ID),
-    annotatorId: String(row.Annotator_ID || '') || null,
+    teacherId: String(row.Annotator_ID || '') || null,
     feedbackText: String(row.Feedback_Text),
     feedbackSource: (String(row.Feedback_Source) || 'AI').toUpperCase() as
       | 'AI'
@@ -156,7 +156,7 @@ async function main() {
   // Validate
   const invalid = data.filter(
     (d) =>
-      !d.studentId || !d.feedbackId || !d.feedbackText || !d.studentResponse
+      !d.studentId || !d.feedbackId || !d.feedbackText || !d.studentText
   )
   if (invalid.length > 0) {
     console.error(`WARNING: ${invalid.length} rows with missing required fields`)
@@ -164,7 +164,7 @@ async function main() {
   }
 
   const valid = data.filter(
-    (d) => d.studentId && d.feedbackId && d.feedbackText && d.studentResponse
+    (d) => d.studentId && d.feedbackId && d.feedbackText && d.studentText
   )
 
   const result = await prisma.feedbackItem.createMany({
