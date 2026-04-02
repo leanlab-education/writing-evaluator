@@ -64,6 +64,11 @@ RubricDimension   — per-project scoring criteria with configurable scales
 FeedbackItem      — imported from CSV (studentText, feedbackText, feedbackSource, teacherId, conjunctionId, optimal, feedbackType)
 ProjectEvaluator  — M:M join between projects and evaluators
 Assignment        — which evaluator scores which items
+Batch             — groups of items with type (REGULAR | CALIBRATION), activity/conjunction filters
+BatchAssignment   — evaluator ↔ batch with scoringRole (PRIMARY | DOUBLE)
+EvaluatorTeam     — pairs of evaluators assigned to specific rubric criteria
+EvaluatorTeamMember    — team ↔ user join
+EvaluatorTeamDimension — team ↔ dimension join
 Score             — individual dimension scores with timing data
 ```
 

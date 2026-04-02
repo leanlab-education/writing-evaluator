@@ -22,10 +22,10 @@ async function main() {
   // Check unique values
   const sources = new Set(records.map((r) => r.Feedback_Source))
   const activities = new Set(records.map((r) => r.Activity_ID))
-  const prompts = new Set(records.map((r) => r.Prompt_ID))
+  const conjunctions = new Set(records.map((r) => r.Conjunction_ID || r.Prompt_ID))
   console.log('Unique Feedback_Source:', [...sources])
   console.log('Unique Activity_ID:', [...activities])
-  console.log('Unique Prompt_ID:', [...prompts])
+  console.log('Unique Conjunction_ID:', [...conjunctions])
 
   // Delete the empty project from the failed CSV attempt
   const emptyProjects = await prisma.project.findMany({
@@ -142,10 +142,10 @@ async function main() {
     cycleId: String(row.Cycle_ID || '') || null,
     studentId: String(row.Student_ID),
     activityId: String(row.Activity_ID || '') || null,
-    conjunctionId: String(row.Prompt_ID || '') || null,
+    conjunctionId: String(row.Conjunction_ID || row.Prompt_ID || '') || null,
     studentText: String(row.Student_Text),
     feedbackId: String(row.Feedback_ID),
-    teacherId: String(row.Annotator_ID || '') || null,
+    teacherId: String(row.Teacher_ID || row.Annotator_ID || '') || null,
     feedbackText: String(row.Feedback_Text),
     feedbackSource: (String(row.Feedback_Source) || 'AI').toUpperCase() as
       | 'AI'

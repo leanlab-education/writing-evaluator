@@ -13,6 +13,7 @@ export async function GET(request: NextRequest) {
 
   const projectId = request.nextUrl.searchParams.get('projectId')
   const type = request.nextUrl.searchParams.get('type') || 'original'
+  const format = request.nextUrl.searchParams.get('format') // 'irr' for IRR comparison
 
   if (!projectId) {
     return NextResponse.json(
@@ -62,10 +63,14 @@ export async function GET(request: NextRequest) {
           optimal: true,
           feedbackType: true,
           feedbackId: true,
+          batchId: true,
+          batch: {
+            select: { name: true, type: true },
+          },
         },
       },
       user: {
-        select: { email: true },
+        select: { email: true, id: true },
       },
       dimension: {
         select: { key: true },
@@ -73,6 +78,29 @@ export async function GET(request: NextRequest) {
     },
     orderBy: [{ feedbackItemId: 'asc' }, { userId: 'asc' }],
   })
+
+  // Look up team membership and batch assignment roles
+  const teamMemberships = await prisma.evaluatorTeamMember.findMany({
+    where: { team: { projectId } },
+    include: {
+      team: { select: { name: true } },
+    },
+  })
+
+  const teamByUserId = new Map<string, string>()
+  for (const tm of teamMemberships) {
+    teamByUserId.set(tm.userId, tm.team.name)
+  }
+
+  const batchAssignments = await prisma.batchAssignment.findMany({
+    where: { batch: { projectId } },
+  })
+
+  // Map (batchId, userId) → scoringRole
+  const roleMap = new Map<string, string>()
+  for (const ba of batchAssignments) {
+    roleMap.set(`${ba.batchId}::${ba.userId}`, ba.scoringRole)
+  }
 
   // Group scores by (feedbackItemId + userId) to build wide-format rows
   let scoreCounter = 0
@@ -93,6 +121,10 @@ export async function GET(request: NextRequest) {
       feedbackType: string | null
       feedbackId: string
       evaluatorEmail: string
+      scoringRole: string
+      teamName: string
+      batchName: string
+      batchType: string
       dimensionScores: Record<string, number>
     }
   >()
@@ -101,6 +133,11 @@ export async function GET(request: NextRequest) {
     const rowKey = `${score.feedbackItemId}::${score.userId}`
     if (!rowMap.has(rowKey)) {
       scoreCounter++
+      const batchId = score.feedbackItem.batchId
+      const userId = score.user.id
+      const scoringRole =
+        batchId ? roleMap.get(`${batchId}::${userId}`) || '' : ''
+
       rowMap.set(rowKey, {
         scoreId: `S${String(scoreCounter).padStart(3, '0')}`,
         responseId: score.feedbackItem.responseId,
@@ -116,6 +153,10 @@ export async function GET(request: NextRequest) {
         feedbackType: score.feedbackItem.feedbackType,
         feedbackId: score.feedbackItem.feedbackId,
         evaluatorEmail: score.user.email,
+        scoringRole,
+        teamName: teamByUserId.get(userId) || '',
+        batchName: score.feedbackItem.batch?.name || '',
+        batchType: score.feedbackItem.batch?.type || '',
         dimensionScores: {},
       })
     }
@@ -142,6 +183,10 @@ export async function GET(request: NextRequest) {
     'Feedback_ID',
     'Score_ID',
     'Evaluator_Email',
+    'Scoring_Role',
+    'Team_Name',
+    'Batch_Name',
+    'Batch_Type',
     ...dimensionLabels,
   ]
 
@@ -163,6 +208,10 @@ export async function GET(request: NextRequest) {
       csvEscape(row.feedbackId),
       csvEscape(row.scoreId),
       csvEscape(row.evaluatorEmail),
+      csvEscape(row.scoringRole),
+      csvEscape(row.teamName),
+      csvEscape(row.batchName),
+      csvEscape(row.batchType),
       ...dimensionKeys.map((key) =>
         row.dimensionScores[key] !== undefined
           ? String(row.dimensionScores[key])

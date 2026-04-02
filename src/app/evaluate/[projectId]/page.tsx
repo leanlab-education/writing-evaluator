@@ -27,11 +27,22 @@ export default async function EvaluatePage({
     }
   }
 
+  // Look up batch type if a batchId is provided
+  let batchType: string | undefined
+  if (batchId) {
+    const batch = await prisma.batch.findUnique({
+      where: { id: batchId },
+      select: { type: true },
+    })
+    batchType = batch?.type ?? undefined
+  }
+
   return (
     <EvaluateClient
       projectId={projectId}
       userName={session.user.name || session.user.email || 'Evaluator'}
       batchId={batchId}
+      batchType={batchType}
     />
   )
 }

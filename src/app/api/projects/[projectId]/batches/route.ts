@@ -73,9 +73,17 @@ export async function GET(
   return NextResponse.json(batchesWithStats)
 }
 
-// POST /api/projects/[projectId]/batches — create batches
-// mode: "auto" groups unassigned items by activityId + conjunctionId (Conjunction_ID from CSV)
-// mode: "manual" creates a single batch with specified name
+// POST /api/projects/[projectId]/batches — create a batch
+// Body: {
+//   name?: string,              — auto-generated if omitted
+//   activityId?: string,        — filter items by activity
+//   conjunctionId?: string,     — filter items by conjunction
+//   batchSize?: number,         — how many items (default 250, or "all" for all matching)
+//   type?: "REGULAR" | "CALIBRATION",
+//   randomize?: boolean,        — shuffle AI/HUMAN order (default true)
+//   itemIds?: string[],         — explicit item selection (for calibration batches)
+//   mode?: "auto",              — legacy: auto-group by activity+conjunction
+// }
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ projectId: string }> }
@@ -90,100 +98,220 @@ export async function POST(
 
   const { projectId } = await params
   const body = await request.json()
-  const { mode, batchSize = 200 } = body
 
-  if (mode === 'auto') {
-    // Get all items not yet in a batch
-    const unbatchedItems = await prisma.feedbackItem.findMany({
-      where: { projectId, batchId: null },
-      orderBy: { displayOrder: 'asc' },
+  // Legacy auto mode — kept for backward compat
+  if (body.mode === 'auto') {
+    return handleAutoMode(projectId, body)
+  }
+
+  const {
+    activityId,
+    conjunctionId,
+    batchSize = 250,
+    type = 'REGULAR',
+    randomize = true,
+    itemIds,
+  } = body
+
+  let name = body.name as string | undefined
+
+  // For calibration batches with explicit item IDs
+  if (type === 'CALIBRATION' && Array.isArray(itemIds) && itemIds.length > 0) {
+    const sortOrder = await prisma.batch.count({ where: { projectId } })
+    const batchName = name || `Calibration Batch`
+
+    const batch = await prisma.batch.create({
+      data: {
+        projectId,
+        name: batchName,
+        type: 'CALIBRATION',
+        size: itemIds.length,
+        sortOrder,
+      },
     })
 
-    if (unbatchedItems.length === 0) {
-      return NextResponse.json(
-        { error: 'No unbatched items found' },
-        { status: 400 }
-      )
-    }
+    await prisma.feedbackItem.updateMany({
+      where: { id: { in: itemIds }, projectId },
+      data: { batchId: batch.id },
+    })
 
-    // Group by activityId + conjunctionId
-    const groups = new Map<string, typeof unbatchedItems>()
-    for (const item of unbatchedItems) {
-      const key = `${item.activityId ?? 'unknown'}::${item.conjunctionId ?? 'unknown'}`
-      if (!groups.has(key)) groups.set(key, [])
-      groups.get(key)!.push(item)
-    }
-
-    // Create batches from groups, splitting by batchSize
-    const createdBatches: { id: string; name: string; itemCount: number }[] = []
-    let sortOrder = await prisma.batch.count({ where: { projectId } })
-
-    for (const [key, groupItems] of groups) {
-      const [activityId, conjunctionId] = key.split('::')
-      const chunks: (typeof groupItems)[] = []
-
-      for (let i = 0; i < groupItems.length; i += batchSize) {
-        chunks.push(groupItems.slice(i, i + batchSize))
-      }
-
-      for (let chunkIdx = 0; chunkIdx < chunks.length; chunkIdx++) {
-        const chunk = chunks[chunkIdx]
-        const batchName =
-          chunks.length > 1
-            ? `Activity ${activityId} - ${conjunctionId} - Batch ${chunkIdx + 1}`
-            : `Activity ${activityId} - ${conjunctionId}`
-
-        const batch = await prisma.batch.create({
-          data: {
-            projectId,
-            name: batchName,
-            activityId: activityId === 'unknown' ? null : activityId,
-            conjunctionId: conjunctionId === 'unknown' ? null : conjunctionId,
-            size: batchSize,
-            sortOrder: sortOrder++,
-          },
-        })
-
-        // Assign items to this batch
-        await prisma.feedbackItem.updateMany({
-          where: { id: { in: chunk.map((item) => item.id) } },
-          data: { batchId: batch.id },
-        })
-
-        createdBatches.push({
-          id: batch.id,
-          name: batch.name,
-          itemCount: chunk.length,
-        })
-      }
+    if (randomize) {
+      await randomizeDisplayOrder(batch.id)
     }
 
     return NextResponse.json(
-      { created: createdBatches.length, batches: createdBatches },
+      { id: batch.id, name: batchName, itemCount: itemIds.length, type },
       { status: 201 }
     )
   }
 
-  // Manual mode: create a single named batch
-  const { name } = body
-  if (!name) {
+  // Standard batch creation: filter → take N → assign to batch
+  const whereClause: Record<string, unknown> = {
+    projectId,
+    batchId: null, // Only unbatched items
+  }
+  if (activityId) whereClause.activityId = activityId
+  if (conjunctionId) whereClause.conjunctionId = conjunctionId
+
+  // Count available items
+  const availableCount = await prisma.feedbackItem.count({
+    where: whereClause,
+  })
+
+  if (availableCount === 0) {
     return NextResponse.json(
-      { error: 'name is required for manual batch creation' },
+      { error: 'No matching unbatched items found' },
       { status: 400 }
     )
   }
 
+  const takeCount =
+    batchSize === 'all' ? availableCount : Math.min(batchSize, availableCount)
+
+  // Fetch items to put in this batch
+  const items = await prisma.feedbackItem.findMany({
+    where: whereClause,
+    take: takeCount,
+    orderBy: { createdAt: 'asc' },
+    select: { id: true },
+  })
+
+  // Auto-generate batch name if not provided
+  if (!name) {
+    const existingCount = await prisma.batch.count({
+      where: { projectId, activityId: activityId || undefined },
+    })
+    const actPart = activityId ? `Activity ${activityId}` : 'All Activities'
+    const conjPart = conjunctionId ? ` / ${conjunctionId}` : ''
+    name = `${actPart}${conjPart} / Batch ${existingCount + 1}`
+  }
+
   const sortOrder = await prisma.batch.count({ where: { projectId } })
+
   const batch = await prisma.batch.create({
     data: {
       projectId,
       name,
-      activityId: body.activityId || null,
-      conjunctionId: body.conjunctionId || null,
-      size: batchSize,
+      activityId: activityId || null,
+      conjunctionId: conjunctionId || null,
+      type: type === 'CALIBRATION' ? 'CALIBRATION' : 'REGULAR',
+      size: takeCount,
       sortOrder,
     },
   })
 
-  return NextResponse.json(batch, { status: 201 })
+  // Assign items to batch
+  await prisma.feedbackItem.updateMany({
+    where: { id: { in: items.map((i) => i.id) } },
+    data: { batchId: batch.id },
+  })
+
+  // Randomize display order within batch (shuffles AI/HUMAN)
+  if (randomize) {
+    await randomizeDisplayOrder(batch.id)
+  }
+
+  return NextResponse.json(
+    { id: batch.id, name, itemCount: items.length, type },
+    { status: 201 }
+  )
+}
+
+// Shuffle displayOrder for items in a batch (Fisher-Yates via DB)
+async function randomizeDisplayOrder(batchId: string) {
+  const items = await prisma.feedbackItem.findMany({
+    where: { batchId },
+    select: { id: true },
+  })
+
+  // Fisher-Yates shuffle of indices
+  const indices = items.map((_, i) => i)
+  for (let i = indices.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[indices[i], indices[j]] = [indices[j], indices[i]]
+  }
+
+  // Update display orders in parallel
+  await Promise.all(
+    items.map((item, i) =>
+      prisma.feedbackItem.update({
+        where: { id: item.id },
+        data: { displayOrder: indices[i] },
+      })
+    )
+  )
+}
+
+// Legacy auto-group mode (kept for backward compat)
+async function handleAutoMode(
+  projectId: string,
+  body: { batchSize?: number }
+) {
+  const batchSize = body.batchSize || 250
+
+  const unbatchedItems = await prisma.feedbackItem.findMany({
+    where: { projectId, batchId: null },
+    orderBy: { displayOrder: 'asc' },
+  })
+
+  if (unbatchedItems.length === 0) {
+    return NextResponse.json(
+      { error: 'No unbatched items found' },
+      { status: 400 }
+    )
+  }
+
+  const groups = new Map<string, typeof unbatchedItems>()
+  for (const item of unbatchedItems) {
+    const key = `${item.activityId ?? 'unknown'}::${item.conjunctionId ?? 'unknown'}`
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key)!.push(item)
+  }
+
+  const createdBatches: { id: string; name: string; itemCount: number }[] = []
+  let sortOrder = await prisma.batch.count({ where: { projectId } })
+
+  for (const [key, groupItems] of groups) {
+    const [activityId, conjunctionId] = key.split('::')
+    const chunks: (typeof groupItems)[] = []
+
+    for (let i = 0; i < groupItems.length; i += batchSize) {
+      chunks.push(groupItems.slice(i, i + batchSize))
+    }
+
+    for (let chunkIdx = 0; chunkIdx < chunks.length; chunkIdx++) {
+      const chunk = chunks[chunkIdx]
+      const batchName =
+        chunks.length > 1
+          ? `Activity ${activityId} / ${conjunctionId} / Batch ${chunkIdx + 1}`
+          : `Activity ${activityId} / ${conjunctionId}`
+
+      const batch = await prisma.batch.create({
+        data: {
+          projectId,
+          name: batchName,
+          activityId: activityId === 'unknown' ? null : activityId,
+          conjunctionId: conjunctionId === 'unknown' ? null : conjunctionId,
+          size: batchSize,
+          sortOrder: sortOrder++,
+        },
+      })
+
+      await prisma.feedbackItem.updateMany({
+        where: { id: { in: chunk.map((item) => item.id) } },
+        data: { batchId: batch.id },
+      })
+
+      createdBatches.push({
+        id: batch.id,
+        name: batch.name,
+        itemCount: chunk.length,
+      })
+    }
+  }
+
+  return NextResponse.json(
+    { created: createdBatches.length, batches: createdBatches },
+    { status: 201 }
+  )
 }

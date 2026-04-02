@@ -22,12 +22,12 @@
 
 ### Data Pipeline
 - Level 1 (Quill student data) + Level 2 (annotator feedback) → Amber cleans/merges in Stata → imports into tool → evaluators score → export as Level 3
-- Input format: Response_ID, Student_ID, Cycle_ID, Activity_ID, Prompt_ID, Student_Text, Feedback_ID, Feedback_Source, Annotator_ID, Feedback_Text
+- Input format: Response_ID, Student_ID, Cycle_ID, Activity_ID, Conjunction_ID, Student_Text, Feedback_ID, Feedback_Source, Teacher_ID, Feedback_Text
 - Output format: Score_ID, Feedback_ID, Evaluator_ID, Dimension_1-6, plus carried-through input fields
 
 ### Hidden Fields (stored but not shown to evaluators)
 - Feedback_Source (Human / AI) — core blinding
-- Annotator_ID (dummy code 999 for AI-generated)
+- Teacher_ID (dummy code 999 for AI-generated)
 
 ### Admin View
 - Assign evaluators to batches of feedback to score

@@ -23,6 +23,7 @@ model User {
   projects         ProjectEvaluator[]
   scores           Score[]
   batchAssignments BatchAssignment[]
+  teamMemberships  EvaluatorTeamMember[]
 }
 
 enum Role {
@@ -48,6 +49,7 @@ model Project {
   evaluators    ProjectEvaluator[]
   assignments   Assignment[]
   batches       Batch[]
+  teams         EvaluatorTeam[]
 }
 
 enum ProjectStatus {
@@ -72,8 +74,9 @@ model RubricDimension {
   scaleMax       Int     @default(3)
   scoreLabelJson String? // JSON: {"1":"Not Present","2":"Unclear","3":"Present"}
 
-  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  scores  Score[]
+  project        Project                  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  scores         Score[]
+  teamDimensions EvaluatorTeamDimension[]
 
   @@unique([projectId, key])
 }
@@ -157,30 +160,82 @@ enum AssignmentStatus {
 // ============================================
 
 model Batch {
-  id         String   @id @default(cuid())
-  projectId  String
-  name          String                    // e.g. "Activity 1 - But - Batch 1"
+  id            String    @id @default(cuid())
+  projectId     String
+  name          String                    // e.g. "Activity 1 / Because / Batch 3"
   activityId    String?                   // Quill activity this batch covers
   conjunctionId String?                   // "But" or "Because"
-  size       Int      @default(200)    // Target batch size
-  sortOrder  Int      @default(0)
-  createdAt  DateTime @default(now())
+  type          BatchType @default(REGULAR)
+  size          Int       @default(250)   // Target batch size
+  isAssigned    Boolean   @default(false) // Locked after first evaluator assignment
+  sortOrder     Int       @default(0)
+  createdAt     DateTime  @default(now())
 
   project       Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
   feedbackItems FeedbackItem[]
   assignments   BatchAssignment[]
 }
 
+enum BatchType {
+  REGULAR     // Normal scoring — evaluator sees only their team's criteria
+  CALIBRATION // All evaluators score all 8 criteria (for IRR baseline)
+}
+
 model BatchAssignment {
-  id        String   @id @default(cuid())
-  batchId   String
-  userId    String
-  createdAt DateTime @default(now())
+  id          String      @id @default(cuid())
+  batchId     String
+  userId      String
+  scoringRole ScoringRole @default(PRIMARY)
+  createdAt   DateTime    @default(now())
 
   batch Batch @relation(fields: [batchId], references: [id], onDelete: Cascade)
   user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([batchId, userId])
+}
+
+enum ScoringRole {
+  PRIMARY // First scorer — this is "their" batch
+  DOUBLE  // Double-scoring for IRR — scoring partner's items
+}
+
+// ============================================
+// Evaluator Teams (pairs of evaluators assigned to specific criteria)
+// ============================================
+
+model EvaluatorTeam {
+  id        String   @id @default(cuid())
+  projectId String
+  name      String   // e.g. "Team Alpha", "Gryffindor"
+  createdAt DateTime @default(now())
+
+  project    Project                  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  members    EvaluatorTeamMember[]
+  dimensions EvaluatorTeamDimension[]
+
+  @@unique([projectId, name])
+}
+
+model EvaluatorTeamMember {
+  id     String @id @default(cuid())
+  teamId String
+  userId String
+
+  team EvaluatorTeam @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([teamId, userId])
+}
+
+model EvaluatorTeamDimension {
+  id          String @id @default(cuid())
+  teamId      String
+  dimensionId String
+
+  team      EvaluatorTeam   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  dimension RubricDimension @relation(fields: [dimensionId], references: [id], onDelete: Cascade)
+
+  @@unique([teamId, dimensionId])
 }
 
 // ============================================

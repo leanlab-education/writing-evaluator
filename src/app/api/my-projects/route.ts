@@ -83,6 +83,49 @@ export async function GET() {
     })
   }
 
+  // Get team memberships for this user across all projects
+  const teamMemberships = await prisma.evaluatorTeamMember.findMany({
+    where: { userId: session.user.id },
+    include: {
+      team: {
+        include: {
+          dimensions: {
+            include: {
+              dimension: { select: { label: true } },
+            },
+            orderBy: { dimension: { sortOrder: 'asc' } },
+          },
+          members: {
+            include: {
+              user: { select: { id: true, name: true, email: true } },
+            },
+          },
+        },
+      },
+    },
+  })
+
+  const teamByProject = new Map<
+    string,
+    {
+      teamName: string
+      criteria: string[]
+      partnerName: string | null
+    }
+  >()
+
+  for (const tm of teamMemberships) {
+    const partner = tm.team.members
+      .filter((m) => m.userId !== session.user!.id)
+      .map((m) => m.user.name || m.user.email)[0] || null
+
+    teamByProject.set(tm.team.projectId, {
+      teamName: tm.team.name,
+      criteria: tm.team.dimensions.map((d) => d.dimension.label),
+      partnerName: partner,
+    })
+  }
+
   const result = evaluatorProjects.map((ep) => {
     const batches = batchesByProject.get(ep.projectId) || []
     // In batch mode, derive totals from batch sums; fall back to Assignment table
@@ -101,6 +144,7 @@ export async function GET() {
       assignmentCount,
       completedCount,
       batches,
+      team: teamByProject.get(ep.projectId) || null,
     }
   })
 

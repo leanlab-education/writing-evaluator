@@ -17,11 +17,21 @@ export async function POST(
 
   const { batchId } = await params
   const body = await request.json()
-  const { userIds } = body as { userIds: string[] }
+  const { userIds, scoringRole = 'PRIMARY' } = body as {
+    userIds: string[]
+    scoringRole?: 'PRIMARY' | 'DOUBLE'
+  }
 
   if (!Array.isArray(userIds) || userIds.length === 0) {
     return NextResponse.json(
       { error: 'userIds array is required' },
+      { status: 400 }
+    )
+  }
+
+  if (scoringRole !== 'PRIMARY' && scoringRole !== 'DOUBLE') {
+    return NextResponse.json(
+      { error: 'scoringRole must be "PRIMARY" or "DOUBLE"' },
       { status: 400 }
     )
   }
@@ -37,7 +47,7 @@ export async function POST(
     userIds.map(async (userId) => {
       try {
         return await prisma.batchAssignment.create({
-          data: { batchId, userId },
+          data: { batchId, userId, scoringRole },
         })
       } catch {
         // Unique constraint violation — already assigned
@@ -47,6 +57,14 @@ export async function POST(
   )
 
   const assignedCount = created.filter(Boolean).length
+
+  // Mark batch as assigned
+  if (assignedCount > 0) {
+    await prisma.batch.update({
+      where: { id: batchId },
+      data: { isAssigned: true },
+    })
+  }
 
   return NextResponse.json(
     { assigned: assignedCount, total: userIds.length },

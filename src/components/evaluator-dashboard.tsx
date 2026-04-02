@@ -21,6 +21,12 @@ interface BatchInfo {
   scoredCount: number
 }
 
+interface TeamInfo {
+  teamName: string
+  criteria: string[]
+  partnerName: string | null
+}
+
 interface EvaluatorProject {
   id: string
   projectId: string
@@ -33,6 +39,7 @@ interface EvaluatorProject {
   assignmentCount: number
   completedCount: number
   batches: BatchInfo[]
+  team?: TeamInfo | null
 }
 
 export function EvaluatorDashboard({
@@ -102,6 +109,27 @@ export function EvaluatorDashboard({
                     )}
                   </CardHeader>
                   <CardContent>
+                    {/* Team info */}
+                    {ep.team && (
+                      <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md bg-muted px-3 py-2 text-xs">
+                        <span className="font-medium">{ep.team.teamName}</span>
+                        <span className="text-muted-foreground">&middot;</span>
+                        <span className="text-muted-foreground">
+                          Criteria: {ep.team.criteria.join(', ')}
+                        </span>
+                        {ep.team.partnerName && (
+                          <>
+                            <span className="text-muted-foreground">
+                              &middot;
+                            </span>
+                            <span className="text-muted-foreground">
+                              Partner: {ep.team.partnerName}
+                            </span>
+                          </>
+                        )}
+                      </div>
+                    )}
+
                     {ep.batches.length > 0 ? (
                       // Batch-based view
                       <div className="space-y-3">

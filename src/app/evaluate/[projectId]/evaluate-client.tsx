@@ -142,14 +142,24 @@ function getSelectedScoreColor(
 // Component
 // ---------------------------------------------------------------------------
 
+interface TeamInfo {
+  teamId: string
+  teamName: string
+  dimensionIds: string[]
+  dimensions: { id: string; key: string; label: string; sortOrder: number }[]
+  partner: { id: string; name: string | null; email: string } | null
+}
+
 export function EvaluateClient({
   projectId,
   userName,
   batchId,
+  batchType,
 }: {
   projectId: string
   userName: string
   batchId?: string
+  batchType?: string
 }) {
   const router = useRouter()
 
@@ -158,6 +168,7 @@ export function EvaluateClient({
   const [items, setItems] = useState<FeedbackItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [teamInfo, setTeamInfo] = useState<TeamInfo | null>(null)
 
   // Navigation
   const [currentIndex, setCurrentIndex] = useState(0)
@@ -194,9 +205,10 @@ export function EvaluateClient({
         ? `/api/feedback-items?projectId=${projectId}&batchId=${batchId}`
         : `/api/feedback-items?projectId=${projectId}`
 
-      const [projectRes, itemsRes] = await Promise.all([
+      const [projectRes, itemsRes, teamRes] = await Promise.all([
         fetch(`/api/projects/${projectId}`),
         fetch(itemsUrl),
+        fetch(`/api/my-team?projectId=${projectId}`),
       ])
 
       if (!projectRes.ok) {
@@ -213,8 +225,25 @@ export function EvaluateClient({
       const projectData: ProjectData = await projectRes.json()
       const itemsData: FeedbackItem[] = await itemsRes.json()
 
+      // Fetch team info for criteria filtering
+      let team: TeamInfo | null = null
+      if (teamRes.ok) {
+        team = await teamRes.json()
+        setTeamInfo(team)
+      }
+
       // Sort rubric by sortOrder
       projectData.rubric.sort((a, b) => a.sortOrder - b.sortOrder)
+
+      // Filter rubric to only the evaluator's team dimensions
+      // UNLESS this is a calibration batch (show all criteria)
+      const isCalibration = batchType === 'CALIBRATION'
+      if (team && !isCalibration) {
+        const teamDimIds = new Set(team.dimensionIds)
+        projectData.rubric = projectData.rubric.filter((d) =>
+          teamDimIds.has(d.id)
+        )
+      }
 
       // Sort items by displayOrder (nulls last), then by id for stable ordering
       itemsData.sort((a, b) => {
