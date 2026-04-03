@@ -18,7 +18,7 @@ async function verifyStudyFlowToken(token: string, email: string) {
     return {
       email: payload.email as string,
       name: payload.name as string | undefined,
-      studyId: payload.study_id as string | undefined,
+      projectId: payload.project_id as string | undefined,
     }
   } catch {
     return null
@@ -59,10 +59,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             })
           }
 
-          // Auto-assign to the project linked to this StudyFlow study
-          if (verified.studyId) {
-            const project = await prisma.project.findFirst({
-              where: { studyflowStudyId: verified.studyId },
+          // Auto-assign to the project if project_id was included in the JWT
+          if (verified.projectId) {
+            const project = await prisma.project.findUnique({
+              where: { id: verified.projectId },
             })
             if (project) {
               await prisma.projectEvaluator.upsert({
