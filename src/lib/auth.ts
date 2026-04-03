@@ -18,6 +18,7 @@ async function verifyStudyFlowToken(token: string, email: string) {
     return {
       email: payload.email as string,
       name: payload.name as string | undefined,
+      studyId: payload.study_id as string | undefined,
     }
   } catch {
     return null
@@ -56,6 +57,22 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
                 role: 'EVALUATOR',
               },
             })
+          }
+
+          // Auto-assign to the project linked to this StudyFlow study
+          if (verified.studyId) {
+            const project = await prisma.project.findFirst({
+              where: { studyflowStudyId: verified.studyId },
+            })
+            if (project) {
+              await prisma.projectEvaluator.upsert({
+                where: {
+                  projectId_userId: { projectId: project.id, userId: user.id },
+                },
+                create: { projectId: project.id, userId: user.id },
+                update: {},
+              })
+            }
           }
 
           return { id: user.id, email: user.email, name: user.name, role: user.role }
