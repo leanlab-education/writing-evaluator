@@ -12,11 +12,20 @@ export async function GET(
   if (!session?.user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
-  if (session.user.role !== 'ADMIN') {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  }
 
   const { projectId } = await params
+
+  // Evaluators can only access projects they're assigned to
+  if (session.user.role !== 'ADMIN') {
+    const assignment = await prisma.projectEvaluator.findUnique({
+      where: {
+        projectId_userId: { projectId, userId: session.user.id },
+      },
+    })
+    if (!assignment) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+  }
 
   const project = await prisma.project.findUnique({
     where: { id: projectId },
