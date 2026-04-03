@@ -53,7 +53,7 @@ export async function PATCH(
 
   const { projectId } = await params
   const body = await request.json()
-  const { status } = body
+  const { status, studyflowStudyId } = body
 
   if (status && !VALID_STATUSES.includes(status)) {
     return NextResponse.json(
@@ -67,6 +67,7 @@ export async function PATCH(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const updateData: Record<string, any> = {}
   if (status) updateData.status = status
+  if (studyflowStudyId !== undefined) updateData.studyflowStudyId = studyflowStudyId || null
 
   const project = await prisma.project.update({
     where: { id: projectId },

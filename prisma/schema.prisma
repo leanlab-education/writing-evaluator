@@ -31,6 +31,21 @@ enum Role {
   EVALUATOR
 }
 
+model AuthToken {
+  id        String        @id @default(cuid())
+  email     String
+  token     String        @unique
+  type      AuthTokenType
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime      @default(now())
+}
+
+enum AuthTokenType {
+  INVITE
+  RESET
+}
+
 // ============================================
 // Projects
 // ============================================
@@ -41,6 +56,7 @@ model Project {
   description          String?
   status               ProjectStatus @default(SETUP)
   discrepancyThreshold Int           @default(1)
+  studyflowStudyId     String?       // Links to a StudyFlow study for participant import
   createdAt            DateTime      @default(now())
   updatedAt            DateTime      @updatedAt
 

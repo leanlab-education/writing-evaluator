@@ -12,7 +12,7 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { FileText } from 'lucide-react'
-import { NavHeader } from '@/components/nav-header'
+import { AppShell } from '@/components/app-shell'
 
 interface BatchInfo {
   id: string
@@ -52,8 +52,7 @@ export function EvaluatorDashboard({
   const router = useRouter()
 
   return (
-    <div className="min-h-screen bg-background">
-      <NavHeader />
+    <AppShell>
       <div className="mx-auto max-w-3xl px-4 py-10 sm:px-6 lg:px-8">
         <div className="mb-6">
           <h1 className="text-2xl font-bold tracking-tight">My Projects</h1>
@@ -216,6 +215,6 @@ export function EvaluatorDashboard({
           </div>
         )}
       </div>
-    </div>
+    </AppShell>
   )
 }

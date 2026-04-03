@@ -42,10 +42,11 @@ import {
   CheckCircle,
   Eye,
 } from 'lucide-react'
-import { NavHeader } from '@/components/nav-header'
+import { AppShell } from '@/components/app-shell'
 import { statusColors } from '@/lib/status-colors'
 import { TeamManagement } from '@/components/team-management'
 import { BatchCreator } from '@/components/batch-creator'
+import { ImportEvaluatorsDialog } from '@/components/import-evaluators-dialog'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -68,6 +69,7 @@ interface Project {
   description: string | null
   status: string
   discrepancyThreshold: number
+  studyflowStudyId: string | null
   createdAt: string
   rubric: RubricDimension[]
   _count: {
@@ -139,14 +141,15 @@ export function ProjectDetailClient({
   const [evaluators, setEvaluators] = useState<EvaluatorRow[]>(initialEvaluators)
   const [scoredItemCount, setScoredItemCount] = useState(initialScoredItemCount)
   const [statusChanging, setStatusChanging] = useState(false)
+  const [activeTab, setActiveTab] = useState('overview')
 
   // Add evaluator dialog
   const [addDialogOpen, setAddDialogOpen] = useState(false)
   const [evalEmail, setEvalEmail] = useState('')
   const [evalName, setEvalName] = useState('')
-  const [evalPassword, setEvalPassword] = useState('')
   const [addingEvaluator, setAddingEvaluator] = useState(false)
   const [evalError, setEvalError] = useState('')
+  const [evalSuccess, setEvalSuccess] = useState('')
 
   // Assignments
   const [assigning, setAssigning] = useState(false)
@@ -239,60 +242,39 @@ export function ProjectDetailClient({
   async function handleAddEvaluator(e: React.FormEvent) {
     e.preventDefault()
     setEvalError('')
+    setEvalSuccess('')
     setAddingEvaluator(true)
 
     try {
-      // 1. Create user
-      const userRes = await fetch('/api/users', {
+      const res = await fetch('/api/invite', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           email: evalEmail.trim(),
           name: evalName.trim() || null,
-          password: evalPassword,
-          role: 'EVALUATOR',
+          projectId,
         }),
       })
 
-      let userId: string
-
-      if (userRes.ok) {
-        const user = await userRes.json()
-        userId = user.id
-      } else if (userRes.status === 409) {
-        // User already exists — look them up
-        const usersRes = await fetch('/api/users')
-        if (!usersRes.ok) throw new Error('Failed to fetch users')
-        const allUsers = await usersRes.json()
-        const existing = allUsers.find(
-          (u: { email: string }) =>
-            u.email.toLowerCase() === evalEmail.trim().toLowerCase()
-        )
-        if (!existing) throw new Error('User not found after conflict')
-        userId = existing.id
-      } else {
-        const err = await userRes.json()
-        setEvalError(err.error || 'Failed to create user')
-        return
-      }
-
-      // 2. Assign to project
-      const assignRes = await fetch(`/api/projects/${projectId}/evaluators`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId }),
-      })
-
-      if (assignRes.ok) {
+      if (res.ok) {
+        const data = await res.json()
         setEvalEmail('')
         setEvalName('')
-        setEvalPassword('')
-        setAddDialogOpen(false)
+        if (data.invited) {
+          setEvalSuccess('Invitation email sent!')
+        } else if (data.alreadyHasPassword) {
+          setEvalSuccess('Evaluator added (already has an account).')
+        }
         await fetchEvaluators()
         await fetchProject()
+        // Auto-close after a brief delay so the user sees the success message
+        setTimeout(() => {
+          setAddDialogOpen(false)
+          setEvalSuccess('')
+        }, 1500)
       } else {
-        const err = await assignRes.json()
-        setEvalError(err.error || 'Failed to assign evaluator')
+        const err = await res.json()
+        setEvalError(err.error || 'Failed to add evaluator')
       }
     } catch (err) {
       console.error('Failed to add evaluator:', err)
@@ -360,8 +342,17 @@ export function ProjectDetailClient({
   // ---------------------------------------------------------------------------
 
   return (
-    <div className="min-h-screen bg-background">
-      <NavHeader />
+    <AppShell
+      projectContext={{
+        id: project.id,
+        name: project.name,
+        activeTab,
+        onTabChange: (tab) => {
+          setActiveTab(tab)
+          if (tab === 'batches') fetchBatches()
+        },
+      }}
+    >
       <div className="mx-auto max-w-5xl px-4 py-10 sm:px-6 lg:px-8">
         {/* Header */}
         <div className="mb-6">
@@ -393,8 +384,12 @@ export function ProjectDetailClient({
         </div>
 
         {/* Tabs */}
-        <Tabs defaultValue="overview" onValueChange={(v) => { if (v === 'batches') fetchBatches() }}>
-          <TabsList>
+        <Tabs value={activeTab} onValueChange={(v) => {
+          setActiveTab(v)
+          if (v === 'batches') fetchBatches()
+        }}>
+          {/* Mobile-only tab list (sidebar handles desktop nav) */}
+          <TabsList className="lg:hidden">
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="evaluators">Evaluators</TabsTrigger>
             <TabsTrigger value="teams">Teams</TabsTrigger>
@@ -485,6 +480,48 @@ export function ProjectDetailClient({
                 </Button>
               )}
             </div>
+
+            {/* StudyFlow Integration */}
+            <Card>
+              <CardHeader className="pb-2">
+                <CardDescription>StudyFlow Integration</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-end gap-3">
+                  <div className="flex-1 space-y-1">
+                    <Label htmlFor="studyflow-id" className="text-xs text-muted-foreground">
+                      StudyFlow Study ID
+                    </Label>
+                    <Input
+                      id="studyflow-id"
+                      value={project.studyflowStudyId || ''}
+                      onChange={(e) => {
+                        setProject((prev) => ({ ...prev, studyflowStudyId: e.target.value || null }))
+                      }}
+                      placeholder="e.g. clx1abc2d..."
+                      className="font-mono text-sm"
+                    />
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={async () => {
+                      await fetch(`/api/projects/${projectId}`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ studyflowStudyId: project.studyflowStudyId }),
+                      })
+                      await fetchProject()
+                    }}
+                  >
+                    Save
+                  </Button>
+                </div>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Link this project to a StudyFlow study to enable participant import.
+                </p>
+              </CardContent>
+            </Card>
           </TabsContent>
 
           {/* ============== EVALUATORS TAB ============== */}
@@ -504,6 +541,13 @@ export function ProjectDetailClient({
                   )}
                   Assign All Items
                 </Button>
+
+                {project.studyflowStudyId && (
+                  <ImportEvaluatorsDialog
+                    projectId={projectId}
+                    onImported={() => { fetchEvaluators(); fetchProject() }}
+                  />
+                )}
 
                 <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
                   <DialogTrigger render={<Button />}>
@@ -535,19 +579,14 @@ export function ProjectDetailClient({
                           placeholder="Jane Doe"
                         />
                       </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="eval-password">Password</Label>
-                        <Input
-                          id="eval-password"
-                          type="password"
-                          value={evalPassword}
-                          onChange={(e) => setEvalPassword(e.target.value)}
-                          placeholder="Temporary password"
-                          required
-                        />
-                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        An invitation email will be sent so they can set their own password.
+                      </p>
                       {evalError && (
                         <p className="text-sm text-destructive">{evalError}</p>
+                      )}
+                      {evalSuccess && (
+                        <p className="text-sm text-success">{evalSuccess}</p>
                       )}
                       <div className="flex justify-end gap-2">
                         <Button
@@ -556,21 +595,22 @@ export function ProjectDetailClient({
                           onClick={() => {
                             setAddDialogOpen(false)
                             setEvalError('')
+                            setEvalSuccess('')
                           }}
                         >
                           Cancel
                         </Button>
                         <Button
                           type="submit"
-                          disabled={addingEvaluator || !evalEmail || !evalPassword}
+                          disabled={addingEvaluator || !evalEmail}
                         >
                           {addingEvaluator ? (
                             <>
                               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                              Adding...
+                              Sending...
                             </>
                           ) : (
-                            'Add Evaluator'
+                            'Send Invite'
                           )}
                         </Button>
                       </div>
@@ -791,6 +831,6 @@ export function ProjectDetailClient({
           </TabsContent>
         </Tabs>
       </div>
-    </div>
+    </AppShell>
   )
 }

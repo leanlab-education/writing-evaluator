@@ -21,7 +21,7 @@ import {
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Upload, ArrowLeft, CheckCircle, Loader2, FileText } from 'lucide-react'
 import { parseCSV, validateCSVRow, type FeedbackCSVRow } from '@/lib/csv-parser'
-import { NavHeader } from '@/components/nav-header'
+import { AppShell } from '@/components/app-shell'
 
 export function ImportClient({ projectId }: { projectId: string }) {
   const router = useRouter()
@@ -130,8 +130,7 @@ export function ImportClient({ projectId }: { projectId: string }) {
   const previewRows = rows.slice(0, 5)
 
   return (
-    <div className="min-h-screen bg-background">
-      <NavHeader />
+    <AppShell>
       <div className="mx-auto max-w-5xl px-4 py-10 sm:px-6 lg:px-8">
         {/* Header */}
         <div className="mb-6">
@@ -327,6 +326,6 @@ export function ImportClient({ projectId }: { projectId: string }) {
           </>
         )}
       </div>
-    </div>
+    </AppShell>
   )
 }

@@ -12,7 +12,7 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { FileText, Users } from 'lucide-react'
 import { CreateProjectDialog } from '@/components/create-project-dialog'
-import { NavHeader } from '@/components/nav-header'
+import { AppShell } from '@/components/app-shell'
 import { statusColors } from '@/lib/status-colors'
 
 export default async function AdminDashboard() {
@@ -33,8 +33,7 @@ export default async function AdminDashboard() {
   })
 
   return (
-    <div className="min-h-screen bg-background">
-      <NavHeader />
+    <AppShell>
       <div className="mx-auto max-w-5xl px-4 py-10 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between">
           <div>
@@ -107,6 +106,6 @@ export default async function AdminDashboard() {
           </div>
         )}
       </div>
-    </div>
+    </AppShell>
   )
 }

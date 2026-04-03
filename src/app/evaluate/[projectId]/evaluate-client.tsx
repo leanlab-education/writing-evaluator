@@ -23,7 +23,7 @@ import {
   AlertTriangle,
   ArrowLeft,
 } from 'lucide-react'
-import { NavHeader } from '@/components/nav-header'
+import { AppShell } from '@/components/app-shell'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -529,60 +529,66 @@ export function EvaluateClient({
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background">
-        <div className="flex flex-col items-center gap-3">
-          <Loader2 className="size-8 animate-spin text-muted-foreground" />
-          <p className="text-sm text-muted-foreground">Loading evaluation...</p>
+      <AppShell defaultCollapsed>
+        <div className="flex min-h-screen items-center justify-center">
+          <div className="flex flex-col items-center gap-3">
+            <Loader2 className="size-8 animate-spin text-muted-foreground" />
+            <p className="text-sm text-muted-foreground">Loading evaluation...</p>
+          </div>
         </div>
-      </div>
+      </AppShell>
     )
   }
 
   if (error) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background">
-        <Card className="max-w-md">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-destructive">
-              <AlertTriangle className="size-5" />
-              Error
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-sm text-muted-foreground">{error}</p>
-            <Button
-              className="mt-4"
-              variant="outline"
-              onClick={() => {
-                setError(null)
-                fetchData()
-              }}
-            >
-              Try Again
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
+      <AppShell defaultCollapsed>
+        <div className="flex min-h-screen items-center justify-center">
+          <Card className="max-w-md">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-destructive">
+                <AlertTriangle className="size-5" />
+                Error
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground">{error}</p>
+              <Button
+                className="mt-4"
+                variant="outline"
+                onClick={() => {
+                  setError(null)
+                  fetchData()
+                }}
+              >
+                Try Again
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      </AppShell>
     )
   }
 
   if (!project || items.length === 0) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background">
-        <Card className="max-w-md">
-          <CardHeader>
-            <CardTitle>No Items to Evaluate</CardTitle>
-            <CardDescription>
-              There are no feedback items assigned to you for this project.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Button variant="outline" onClick={() => router.push('/')}>
-              Return to Dashboard
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
+      <AppShell defaultCollapsed>
+        <div className="flex min-h-screen items-center justify-center">
+          <Card className="max-w-md">
+            <CardHeader>
+              <CardTitle>No Items to Evaluate</CardTitle>
+              <CardDescription>
+                There are no feedback items assigned to you for this project.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button variant="outline" onClick={() => router.push('/')}>
+                Return to Dashboard
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      </AppShell>
     )
   }
 
@@ -592,9 +598,8 @@ export function EvaluateClient({
 
   if (allComplete) {
     return (
-      <div className="min-h-screen bg-background">
-        <NavHeader />
-        <div className="flex min-h-[calc(100vh-3.5rem)] items-center justify-center">
+      <AppShell defaultCollapsed>
+        <div className="flex min-h-screen items-center justify-center">
           <Card className="max-w-lg text-center">
             <CardHeader>
               <div className="mx-auto mb-2 flex size-16 items-center justify-center rounded-full bg-success/10">
@@ -622,7 +627,7 @@ export function EvaluateClient({
             </CardContent>
           </Card>
         </div>
-      </div>
+      </AppShell>
     )
   }
 
@@ -633,11 +638,11 @@ export function EvaluateClient({
   const rubric = project.rubric
 
   return (
-    <div className="flex min-h-screen flex-col bg-background">
-      <NavHeader />
+    <AppShell defaultCollapsed>
+      <div className="flex min-h-screen flex-col">
 
       {/* Evaluation sub-header */}
-      <header className="sticky top-14 z-10 border-b bg-background/95 px-4 py-3 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-background/80">
+      <header className="sticky top-0 z-10 border-b bg-background/95 px-4 py-3 shadow-sm backdrop-blur lg:top-0 supports-[backdrop-filter]:bg-background/80">
         <div className="mx-auto flex max-w-7xl flex-col gap-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -914,6 +919,7 @@ export function EvaluateClient({
           </Card>
         </div>
       </main>
-    </div>
+      </div>
+    </AppShell>
   )
 }
