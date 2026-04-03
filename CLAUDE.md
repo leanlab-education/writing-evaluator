@@ -4,7 +4,7 @@
 
 A standalone blinded, rubric-based scoring tool for evaluating written feedback quality (human vs AI-generated). Built for Leanlab's Quill/CZI project. External collaborators (Amber Wang at Quill, CZI) will use this tool.
 
-**Not part of StudyFlow.** This is a separate repo with its own auth, database, and deployment.
+**Not part of StudyFlow.** This is a separate repo with its own auth, database, and deployment. However, it has a **magic link integration** with StudyFlow — evaluators can launch Writing Evaluator from a StudyFlow activity and be auto-signed in via a signed JWT.
 
 ## Git Commits
 
@@ -70,6 +70,7 @@ EvaluatorTeam     — pairs of evaluators assigned to specific rubric criteria
 EvaluatorTeamMember    — team ↔ user join
 EvaluatorTeamDimension — team ↔ dimension join
 Score             — individual dimension scores with timing data
+AuthToken         — invite/reset tokens with expiry (type: INVITE | RESET)
 ```
 
 Key relationships:
@@ -81,9 +82,12 @@ Key relationships:
 
 - **Auth.js v5** with Credentials provider (email + bcrypt password)
 - **JWT strategy** (no database sessions)
-- **Middleware** (`src/middleware.ts`) protects all routes except `/login`, `/api/auth`, and static assets
+- **Auth callback** in `auth.ts` protects all routes except `/login`, `/invite/*`, `/reset-password/*`, and `/api/*`
 - **Role check**: Server components use `const session = await auth()` then check `session.user.role`
 - **Roles**: `ADMIN` (manages projects, imports data, configures rubrics) and `EVALUATOR` (scores items)
+- **Magic link login**: StudyFlow sends users to `/login?studyflow_token=...&email=...` — the login page auto-verifies the JWT and creates/finds the evaluator account
+- **Email invite flow**: Admin enters email → Resend sends invite → user clicks link → sets password at `/invite/[token]`
+- **Password reset**: Email-based reset link at `/reset-password`
 
 ### Test Accounts
 | Email | Password | Role |
@@ -97,7 +101,10 @@ Key relationships:
 src/
 ├── app/
 │   ├── page.tsx                          # Server: evaluator dashboard (redirects ADMIN → /admin)
-│   ├── login/page.tsx                    # Client: login form
+│   ├── login/page.tsx                    # Client: login form + StudyFlow magic link auto-login
+│   ├── invite/[token]/page.tsx           # Client: accept invite + set password
+│   ├── reset-password/page.tsx           # Client: request password reset
+│   ├── reset-password/[token]/page.tsx   # Client: set new password
 │   ├── layout.tsx                        # Root layout with SessionProvider
 │   ├── admin/
 │   │   ├── page.tsx                      # Server: admin project list + CreateProjectDialog
@@ -116,28 +123,38 @@ src/
 │       ├── projects/[projectId]/
 │       │   ├── route.ts                  # GET (detail with rubric) / PATCH (update status)
 │       │   ├── evaluators/route.ts       # GET / POST (add evaluator)
+│       │   ├── import-evaluators/route.ts # POST (import evaluators from StudyFlow)
 │       │   ├── assignments/route.ts      # POST (assign all items to evaluators)
 │       │   └── stats/route.ts            # GET (scored item count)
 │       ├── feedback-items/route.ts       # GET (by projectId) / POST (bulk import from CSV)
-│       ├── scores/route.ts              # GET (by projectId) / POST (save score)
+│       ├── scores/route.ts              # GET (by projectId) / POST (save score) / PUT (auto-save upsert)
 │       ├── export/route.ts              # GET (CSV export with unblinded feedbackSource)
+│       ├── invite/route.ts              # POST (send invite email)
+│       ├── invite/accept/route.ts       # POST (accept invite + set password)
+│       ├── reset-password/route.ts      # POST (send reset email)
+│       ├── reset-password/accept/route.ts # POST (set new password)
 │       ├── my-projects/route.ts         # GET (evaluator's assigned projects)
 │       └── users/route.ts               # GET (list evaluator users for admin)
 ├── components/
+│   ├── app-shell.tsx                     # Client: sidebar layout wrapper
+│   ├── app-sidebar.tsx                   # Client: collapsible left sidebar (replaces NavHeader)
 │   ├── create-project-dialog.tsx         # Client: new project form dialog
 │   ├── evaluator-dashboard.tsx           # Client: evaluator project cards with progress
-│   ├── project-detail-client.tsx         # Client: project tabs (Overview, Evaluators, Rubric, Export)
+│   ├── import-evaluators-dialog.tsx      # Client: import evaluators from StudyFlow
+│   ├── project-detail-client.tsx         # Client: project tabs (Overview, Evaluators, Teams, Batches, Rubric, Export)
 │   ├── providers.tsx                     # SessionProvider wrapper
 │   └── ui/                              # shadcn/ui components
 ├── lib/
-│   ├── auth.ts                           # Auth.js config (providers, callbacks, JWT)
+│   ├── auth.ts                           # Auth.js config (providers, callbacks, JWT, magic link verify)
 │   ├── db.ts                             # Prisma client with Neon adapter
 │   ├── csv-parser.ts                     # CSV parsing + validation for feedback item import
+│   ├── email.ts                          # Resend email sending (invites, password reset)
+│   ├── studyflow-client.ts              # StudyFlow API client (fetch participants via signed JWT)
+│   ├── tokens.ts                         # Auth token creation/verification (invite, reset)
 │   ├── rubric-templates.ts               # Default rubric (8 generic criteria, 1-3 scale)
 │   └── utils.ts                          # cn() helper
 ├── types/
 │   └── next-auth.d.ts                    # Augments Session type with role + id
-├── middleware.ts                          # Auth middleware
 └── generated/prisma/                     # Generated Prisma client (gitignored)
 ```
 
@@ -182,26 +199,43 @@ Full reference: `docs/DESIGN_SYSTEM.md`
 4. **Content cards**: Use `bg-content-student-*` / `bg-content-feedback-*` tokens for the split-pane evaluation view
 5. **Dark mode is automatic** — just use semantic tokens and it works. Both `:root` and `.dark` are fully defined in globals.css
 6. **All interactive elements**: Add `transition-all duration-200`
-7. **All authenticated pages** must include `<NavHeader />` at the top
+7. **All authenticated pages** use `<AppShell>` with collapsible sidebar (no NavHeader — it was replaced)
 8. **Frosted glass nav**: `bg-background/80 backdrop-blur-lg supports-[backdrop-filter]:bg-background/60 border-b border-border`
 9. **Page containers**: Use `py-10` consistent padding
 10. **Card hover**: `hover:shadow-sm hover:ring-1 hover:ring-primary/10`
 
 ## Environment Variables
 
+All env vars are in **Vercel** (not synced with Doppler yet).
+
 ```
-DATABASE_URL=postgresql://...   # Neon connection string
-AUTH_SECRET=...                  # Auth.js session secret
+DATABASE_URL=postgresql://...        # Neon connection string
+AUTH_SECRET=...                      # Auth.js session secret
+STUDYFLOW_LINK_SECRET=...           # Shared secret for StudyFlow ↔ Writing Evaluator JWT signing (same value in both projects)
+STUDYFLOW_API_URL=https://studyflow.leanlabeducation.org  # StudyFlow API base URL (for fetching participants)
+RESEND_API_KEY=...                   # Resend email service (invite + password reset emails)
+APP_URL=https://writing-evaluator.vercel.app  # This app's public URL (used in email links)
 ```
+
+## StudyFlow Integration
+
+**Study-specific** — only the Quill - Evaluators study uses this integration.
+
+- **Magic link login**: StudyFlow signs a JWT with `STUDYFLOW_LINK_SECRET` containing `email`, `name`, `study_id`, `purpose`. Writing Evaluator verifies the JWT at `/login` and auto-creates evaluator accounts.
+- **Participant import**: Writing Evaluator can fetch active participants from StudyFlow via signed JWT to `STUDYFLOW_API_URL/api/studies/{studyId}/participants`. Admin uses "Import from StudyFlow" on the Evaluators tab.
+- **Study linking**: Each project has an optional `studyflowStudyId` field (set in Overview tab) that connects it to a StudyFlow study.
+- **Shared secret**: `STUDYFLOW_LINK_SECRET` must be the same value in both projects.
+
+## Deployment
+
+- **Platform**: Vercel (project: `writing-evaluator`)
+- **Production URL**: `https://writing-evaluator.vercel.app`
+- **Env vars**: Managed directly in Vercel (not Doppler — migration pending)
 
 ## Remaining TODO
 
-- [ ] Initialize git, create GitHub org (`leanlab-education`), create repo (`writing-evaluator`), push
-- [ ] Verify production build compiles (may need adapter fixes for Next.js build)
-- [ ] Test full end-to-end flow in browser
+- [ ] Migrate env vars from Vercel to Doppler as single source of truth
 - [ ] Connect to Replit for non-engineer access
-- [ ] Deploy somewhere (Vercel or Replit)
-- [ ] Generate a strong `AUTH_SECRET` for production
 
 ## People
 
