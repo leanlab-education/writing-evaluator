@@ -32,7 +32,7 @@ Same as StudyFlow: **do it right the first time.** No bandaid fixes, no duplicat
 ## Commands
 
 ```bash
-npm run dev          # Start dev server
+npm run dev          # Start dev server (uses doppler run to inject env vars)
 npm run build        # Production build
 npm run lint         # ESLint
 npx prisma generate  # Regenerate Prisma client after schema changes
@@ -206,15 +206,19 @@ Full reference: `docs/DESIGN_SYSTEM.md`
 
 ## Environment Variables
 
-All env vars are in **Vercel** (not synced with Doppler yet).
+**Doppler is the single source of truth.** Project: `writing-evaluator`. Synced to Vercel via Doppler-Vercel integration.
+
+- **Configs**: `prd` → Vercel Production, `stg` → Vercel Preview, `dev` → Vercel Development + local dev (via `doppler run`)
+- **Local dev**: No `.env` file needed — `npm run dev` uses `doppler run` to inject secrets
+- **To add/change a secret**: Update in Doppler, it auto-syncs to Vercel
 
 ```
-DATABASE_URL=postgresql://...        # Neon connection string
-AUTH_SECRET=...                      # Auth.js session secret
-STUDYFLOW_LINK_SECRET=...           # Shared secret for StudyFlow ↔ Writing Evaluator JWT signing (same value in both projects)
-STUDYFLOW_API_URL=https://studyflow.leanlabeducation.org  # StudyFlow API base URL (for fetching participants)
-RESEND_API_KEY=...                   # Resend email service (invite + password reset emails)
-APP_URL=https://writing-evaluator.vercel.app  # This app's public URL (used in email links)
+DATABASE_URL                # Neon connection string
+AUTH_SECRET                 # Auth.js session secret
+STUDYFLOW_LINK_SECRET       # Shared secret for StudyFlow ↔ Writing Evaluator JWT signing (same value in both projects)
+STUDYFLOW_API_URL           # StudyFlow API base URL (for fetching participants)
+RESEND_API_KEY              # Resend email service (invite + password reset emails)
+APP_URL                     # This app's public URL (used in email links)
 ```
 
 ## StudyFlow Integration
@@ -234,7 +238,6 @@ APP_URL=https://writing-evaluator.vercel.app  # This app's public URL (used in e
 
 ## Remaining TODO
 
-- [ ] Migrate env vars from Vercel to Doppler as single source of truth
 - [ ] Connect to Replit for non-engineer access
 
 ## People
