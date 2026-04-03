@@ -59,12 +59,28 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             })
           }
 
-          // Auto-assign to the project if project_id was included in the JWT
+          // Auto-assign to project(s) linked to StudyFlow
+          // Try direct project_id from JWT first, then fall back to all StudyFlow-linked projects
           if (verified.projectId) {
             const project = await prisma.project.findUnique({
               where: { id: verified.projectId },
             })
             if (project) {
+              await prisma.projectEvaluator.upsert({
+                where: {
+                  projectId_userId: { projectId: project.id, userId: user.id },
+                },
+                create: { projectId: project.id, userId: user.id },
+                update: {},
+              })
+            }
+          } else {
+            // No project_id in JWT — assign to all StudyFlow-linked projects
+            const studyflowProjects = await prisma.project.findMany({
+              where: { studyflowStudyId: { not: null } },
+              select: { id: true },
+            })
+            for (const project of studyflowProjects) {
               await prisma.projectEvaluator.upsert({
                 where: {
                   projectId_userId: { projectId: project.id, userId: user.id },
