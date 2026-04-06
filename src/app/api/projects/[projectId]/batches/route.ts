@@ -60,12 +60,17 @@ export async function GET(
         name: batch.name,
         activityId: batch.activityId,
         conjunctionId: batch.conjunctionId,
+        status: batch.status,
+        type: batch.type,
         size: batch.size,
         sortOrder: batch.sortOrder,
         createdAt: batch.createdAt,
         itemCount: batch._count.feedbackItems,
         scoredItemCount,
-        evaluators: batch.assignments.map((a) => a.user),
+        evaluators: batch.assignments.map((a) => ({
+          ...a.user,
+          scoringRole: a.scoringRole,
+        })),
       }
     })
   )

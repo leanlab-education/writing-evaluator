@@ -17,6 +17,7 @@ import { AppShell } from '@/components/app-shell'
 interface BatchInfo {
   id: string
   name: string
+  status: string
   itemCount: number
   scoredCount: number
 }
@@ -165,15 +166,19 @@ export function EvaluatorDashboard({
                                   )
                                 }
                                 disabled={
-                                  ep.project.status !== 'ACTIVE' ||
+                                  batch.status !== 'SCORING' ||
                                   batchComplete
                                 }
                               >
                                 {batchComplete
                                   ? 'Done'
-                                  : batch.scoredCount > 0
-                                    ? 'Continue'
-                                    : 'Start'}
+                                  : batch.status !== 'SCORING'
+                                    ? batch.status === 'COMPLETE'
+                                      ? 'Closed'
+                                      : 'Not Open'
+                                    : batch.scoredCount > 0
+                                      ? 'Continue'
+                                      : 'Start'}
                               </Button>
                             </div>
                           )
@@ -195,15 +200,11 @@ export function EvaluatorDashboard({
                             onClick={() =>
                               router.push(`/evaluate/${ep.project.id}`)
                             }
-                            disabled={
-                              ep.project.status !== 'ACTIVE' || isComplete
-                            }
+                            disabled={isComplete}
                           >
                             {isComplete
                               ? 'All Done'
-                              : ep.project.status === 'ACTIVE'
-                                ? 'Start Evaluating'
-                                : 'Not Active'}
+                              : 'Start Evaluating'}
                           </Button>
                         </div>
                       </>

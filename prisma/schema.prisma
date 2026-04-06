@@ -176,20 +176,28 @@ enum AssignmentStatus {
 // ============================================
 
 model Batch {
-  id            String    @id @default(cuid())
+  id            String      @id @default(cuid())
   projectId     String
-  name          String                    // e.g. "Activity 1 / Because / Batch 3"
-  activityId    String?                   // Quill activity this batch covers
-  conjunctionId String?                   // "But" or "Because"
-  type          BatchType @default(REGULAR)
-  size          Int       @default(250)   // Target batch size
-  isAssigned    Boolean   @default(false) // Locked after first evaluator assignment
-  sortOrder     Int       @default(0)
-  createdAt     DateTime  @default(now())
+  name          String                       // e.g. "Activity 1 / Because / Batch 3"
+  activityId    String?                      // Quill activity this batch covers
+  conjunctionId String?                      // "But" or "Because"
+  type          BatchType   @default(REGULAR)
+  status        BatchStatus @default(DRAFT)
+  size          Int         @default(250)    // Target batch size
+  isAssigned    Boolean     @default(false)  // Locked after first evaluator assignment
+  sortOrder     Int         @default(0)
+  createdAt     DateTime    @default(now())
 
   project       Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
   feedbackItems FeedbackItem[]
   assignments   BatchAssignment[]
+}
+
+enum BatchStatus {
+  DRAFT       // Created but not yet open for scoring
+  SCORING     // Evaluators can score items
+  RECONCILING // Double-scoring complete, team reconciling discrepancies
+  COMPLETE    // Done, scores locked
 }
 
 enum BatchType {

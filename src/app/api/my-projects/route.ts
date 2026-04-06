@@ -58,7 +58,7 @@ export async function GET() {
   // Group batch assignments by projectId
   const batchesByProject = new Map<
     string,
-    { id: string; name: string; itemCount: number; scoredCount: number }[]
+    { id: string; name: string; status: string; itemCount: number; scoredCount: number }[]
   >()
 
   for (const ba of batchAssignments) {
@@ -78,6 +78,7 @@ export async function GET() {
     batchesByProject.get(pid)!.push({
       id: ba.batch.id,
       name: ba.batch.name,
+      status: ba.batch.status,
       itemCount: ba.batch._count.feedbackItems,
       scoredCount,
     })

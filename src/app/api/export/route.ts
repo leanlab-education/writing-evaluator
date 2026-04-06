@@ -14,6 +14,8 @@ export async function GET(request: NextRequest) {
   const projectId = request.nextUrl.searchParams.get('projectId')
   const type = request.nextUrl.searchParams.get('type') || 'original'
   const format = request.nextUrl.searchParams.get('format') // 'irr' for IRR comparison
+  const activityId = request.nextUrl.searchParams.get('activityId')
+  const conjunctionId = request.nextUrl.searchParams.get('conjunctionId')
 
   if (!projectId) {
     return NextResponse.json(
@@ -45,7 +47,11 @@ export async function GET(request: NextRequest) {
   // Get all scores for this project with full feedback item data
   const scores = await prisma.score.findMany({
     where: {
-      feedbackItem: { projectId },
+      feedbackItem: {
+        projectId,
+        ...(activityId ? { activityId } : {}),
+        ...(conjunctionId ? { conjunctionId } : {}),
+      },
       isReconciled: type === 'reconciled',
     },
     include: {
@@ -222,7 +228,10 @@ export async function GET(request: NextRequest) {
   }
 
   const csv = csvRows.join('\n')
-  const filename = `scores-${type}-${new Date().toISOString().split('T')[0]}.csv`
+  const filterParts = [type]
+  if (activityId) filterParts.push(`activity-${activityId}`)
+  if (conjunctionId) filterParts.push(`conj-${conjunctionId}`)
+  const filename = `scores-${filterParts.join('-')}-${new Date().toISOString().split('T')[0]}.csv`
 
   return new Response(csv, {
     status: 200,

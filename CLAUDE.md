@@ -59,12 +59,12 @@ npx tsx scripts/seed.ts  # Seed admin + test evaluator users
 
 ```
 User              — email, hashedPassword, role (ADMIN | EVALUATOR)
-Project           — name, status (SETUP → ACTIVE → RECONCILIATION → COMPLETE)
+Project           — name, status (display-only, derived from batch states)
 RubricDimension   — per-project scoring criteria with configurable scales
 FeedbackItem      — imported from CSV (studentText, feedbackText, feedbackSource, teacherId, conjunctionId, optimal, feedbackType)
 ProjectEvaluator  — M:M join between projects and evaluators
 Assignment        — which evaluator scores which items
-Batch             — groups of items with type (REGULAR | CALIBRATION), activity/conjunction filters
+Batch             — groups of items with status (DRAFT → SCORING → RECONCILING → COMPLETE), type (REGULAR | CALIBRATION)
 BatchAssignment   — evaluator ↔ batch with scoringRole (PRIMARY | DOUBLE)
 EvaluatorTeam     — pairs of evaluators assigned to specific rubric criteria
 EvaluatorTeamMember    — team ↔ user join

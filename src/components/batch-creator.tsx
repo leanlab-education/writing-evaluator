@@ -20,6 +20,7 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog'
 import { Loader2, Plus, Shuffle } from 'lucide-react'
+import { batchStatusColors, batchStatusLabels } from '@/lib/status-colors'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -43,6 +44,7 @@ interface BatchRow {
   name: string
   activityId: string | null
   conjunctionId: string | null
+  status: string
   size: number
   sortOrder: number
   itemCount: number
@@ -96,6 +98,10 @@ export function BatchCreator({
     groups: UnbatchedGroup[]
   } | null>(null)
   const [statsLoading, setStatsLoading] = useState(false)
+
+  // Batch list filters
+  const [filterActivity, setFilterActivity] = useState('')
+  const [filterConjunction, setFilterConjunction] = useState('')
 
   // Batch assignment
   const [assigningBatch, setAssigningBatch] = useState<string | null>(null)
@@ -153,6 +159,28 @@ export function BatchCreator({
         .filter(Boolean) as string[]
     ),
   ].sort()
+
+  // Unique activity/conjunction IDs from existing batches (for list filters)
+  const batchActivityIds = [
+    ...new Set(
+      batches.map((b) => b.activityId).filter(Boolean) as string[]
+    ),
+  ].sort()
+  const batchConjunctionIds = [
+    ...new Set(
+      batches
+        .filter((b) => (filterActivity ? b.activityId === filterActivity : true))
+        .map((b) => b.conjunctionId)
+        .filter(Boolean) as string[]
+    ),
+  ].sort()
+
+  // Filtered batch list
+  const filteredBatches = batches.filter((b) => {
+    if (filterActivity && b.activityId !== filterActivity) return false
+    if (filterConjunction && b.conjunctionId !== filterConjunction) return false
+    return true
+  })
 
   // Count of available items matching current filters
   const matchingCount =
@@ -251,6 +279,27 @@ export function BatchCreator({
     }
   }
 
+  async function handleBatchStatusChange(batchId: string, newStatus: string) {
+    if (newStatus === 'COMPLETE' && !confirm('This will prevent evaluators from making further changes to this batch. Continue?')) {
+      return
+    }
+    try {
+      const res = await fetch(
+        `/api/projects/${projectId}/batches/${batchId}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: newStatus }),
+        }
+      )
+      if (res.ok) {
+        onBatchesChange()
+      }
+    } catch (err) {
+      console.error('Failed to update batch status:', err)
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // Render
   // ---------------------------------------------------------------------------
@@ -299,7 +348,7 @@ export function BatchCreator({
                     }
                     onClick={() => setBatchType('CALIBRATION')}
                   >
-                    Calibration (IRR)
+                    Calibration
                   </Button>
                 </div>
                 {batchType === 'CALIBRATION' && (
@@ -442,6 +491,41 @@ export function BatchCreator({
         </Dialog>
       </div>
 
+      {/* Batch list filters */}
+      {batches.length > 0 && (
+        <div className="flex items-center gap-3">
+          <span className="text-sm font-medium text-muted-foreground">Filter:</span>
+          <select
+            className="flex h-8 rounded-md border border-input bg-background px-2 py-1 text-sm shadow-sm transition-colors"
+            value={filterActivity}
+            onChange={(e) => {
+              setFilterActivity(e.target.value)
+              setFilterConjunction('')
+            }}
+          >
+            <option value="">All activities</option>
+            {batchActivityIds.map((id) => (
+              <option key={id} value={id}>Activity {id}</option>
+            ))}
+          </select>
+          <select
+            className="flex h-8 rounded-md border border-input bg-background px-2 py-1 text-sm shadow-sm transition-colors"
+            value={filterConjunction}
+            onChange={(e) => setFilterConjunction(e.target.value)}
+          >
+            <option value="">All conjunctions</option>
+            {batchConjunctionIds.map((id) => (
+              <option key={id} value={id}>{id}</option>
+            ))}
+          </select>
+          {(filterActivity || filterConjunction) && (
+            <span className="text-xs text-muted-foreground">
+              {filteredBatches.length} of {batches.length} batches
+            </span>
+          )}
+        </div>
+      )}
+
       {/* Batch list */}
       {batchesLoading ? (
         <div className="flex items-center justify-center py-8">
@@ -454,7 +538,7 @@ export function BatchCreator({
         </div>
       ) : (
         <div className="space-y-4">
-          {batches.map((batch) => {
+          {filteredBatches.map((batch) => {
             const pct =
               batch.itemCount > 0
                 ? Math.round(
@@ -471,15 +555,30 @@ export function BatchCreator({
                       <CardTitle className="text-base">
                         {batch.name}
                       </CardTitle>
+                      <Badge className={batchStatusColors[batch.status] || ''}>
+                        {batchStatusLabels[batch.status] || batch.status}
+                      </Badge>
                       {isCalibration && (
                         <Badge className="bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
                           Calibration
                         </Badge>
                       )}
                     </div>
-                    <Badge variant="outline">
-                      {batch.scoredItemCount}/{batch.itemCount} scored ({pct}%)
-                    </Badge>
+                    <div className="flex items-center gap-2">
+                      <select
+                        className="flex h-7 rounded-md border border-input bg-background px-2 py-0.5 text-xs shadow-sm transition-colors"
+                        value={batch.status}
+                        onChange={(e) => handleBatchStatusChange(batch.id, e.target.value)}
+                      >
+                        <option value="DRAFT">Draft</option>
+                        <option value="SCORING">Scoring</option>
+                        <option value="RECONCILING">Reconciling</option>
+                        <option value="COMPLETE">Complete</option>
+                      </select>
+                      <Badge variant="outline">
+                        {batch.scoredItemCount}/{batch.itemCount} scored ({pct}%)
+                      </Badge>
+                    </div>
                   </div>
                   <CardDescription>
                     {batch.itemCount} items
@@ -518,7 +617,7 @@ export function BatchCreator({
                             {ev.name || ev.email}
                             {ev.scoringRole === 'DOUBLE' && (
                               <span className="ml-1 text-xs text-muted-foreground">
-                                (IRR)
+                                (Double)
                               </span>
                             )}
                             <button
@@ -567,8 +666,8 @@ export function BatchCreator({
                             )
                           }
                         >
-                          <option value="PRIMARY">Primary</option>
-                          <option value="DOUBLE">Double (IRR)</option>
+                          <option value="PRIMARY">Independent</option>
+                          <option value="DOUBLE">Double</option>
                         </select>
                         <Button
                           size="sm"

@@ -16,14 +16,31 @@ export default async function EvaluatePage({
   const { projectId } = await params
   const { batchId } = await searchParams
 
-  // Non-admins can only access ACTIVE projects
+  // Non-admins: verify they have a scorable batch in this project
   if (session.user.role !== 'ADMIN') {
-    const project = await prisma.project.findUnique({
-      where: { id: projectId },
-      select: { status: true },
-    })
-    if (!project || project.status !== 'ACTIVE') {
-      redirect('/')
+    if (batchId) {
+      // Check the specific batch is open for scoring
+      const batch = await prisma.batch.findUnique({
+        where: { id: batchId },
+        select: { status: true, projectId: true },
+      })
+      if (!batch || batch.projectId !== projectId || (batch.status !== 'SCORING' && batch.status !== 'RECONCILING')) {
+        redirect('/')
+      }
+    } else {
+      // Check user has at least one scorable batch in this project
+      const scorableBatch = await prisma.batchAssignment.findFirst({
+        where: {
+          userId: session.user.id,
+          batch: {
+            projectId,
+            status: { in: ['SCORING', 'RECONCILING'] },
+          },
+        },
+      })
+      if (!scorableBatch) {
+        redirect('/')
+      }
     }
   }
 

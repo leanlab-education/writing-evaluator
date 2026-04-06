@@ -98,27 +98,12 @@ interface BatchRow {
   name: string
   activityId: string | null
   conjunctionId: string | null
+  status: string
   size: number
   sortOrder: number
   itemCount: number
   scoredItemCount: number
-  evaluators: { id: string; email: string; name: string | null }[]
-}
-
-// ---------------------------------------------------------------------------
-// Status helpers
-// ---------------------------------------------------------------------------
-
-const statusFlow: Record<string, string> = {
-  SETUP: 'ACTIVE',
-  ACTIVE: 'RECONCILIATION',
-  RECONCILIATION: 'COMPLETE',
-}
-
-const statusActionLabel: Record<string, string> = {
-  SETUP: 'Start Evaluations',
-  ACTIVE: 'Begin Reconciliation',
-  RECONCILIATION: 'Mark Complete',
+  evaluators: { id: string; email: string; name: string | null; scoringRole?: string }[]
 }
 
 // ---------------------------------------------------------------------------
@@ -140,7 +125,6 @@ export function ProjectDetailClient({
   const [project, setProject] = useState<Project>(initialProject)
   const [evaluators, setEvaluators] = useState<EvaluatorRow[]>(initialEvaluators)
   const [scoredItemCount, setScoredItemCount] = useState(initialScoredItemCount)
-  const [statusChanging, setStatusChanging] = useState(false)
   const [activeTab, setActiveTab] = useState('overview')
 
   // Add evaluator dialog
@@ -158,6 +142,10 @@ export function ProjectDetailClient({
   // Batches
   const [batches, setBatches] = useState<BatchRow[]>([])
   const [batchesLoading, setBatchesLoading] = useState(false)
+
+  // Export filters
+  const [exportActivity, setExportActivity] = useState('')
+  const [exportConjunction, setExportConjunction] = useState('')
 
   // ---------------------------------------------------------------------------
   // Data re-fetching (after mutations)
@@ -217,27 +205,6 @@ export function ProjectDetailClient({
   // ---------------------------------------------------------------------------
   // Actions
   // ---------------------------------------------------------------------------
-
-  async function handleStatusChange() {
-    const nextStatus = statusFlow[project.status]
-    if (!nextStatus) return
-
-    setStatusChanging(true)
-    try {
-      const res = await fetch(`/api/projects/${projectId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: nextStatus }),
-      })
-      if (res.ok) {
-        await fetchProject()
-      }
-    } catch (err) {
-      console.error('Failed to change status:', err)
-    } finally {
-      setStatusChanging(false)
-    }
-  }
 
   async function handleAddEvaluator(e: React.FormEvent) {
     e.preventDefault()
@@ -312,10 +279,10 @@ export function ProjectDetailClient({
   }
 
   function handleExport(type: 'original' | 'reconciled') {
-    window.open(
-      `/api/export?projectId=${projectId}&type=${type}`,
-      '_blank'
-    )
+    const params = new URLSearchParams({ projectId, type })
+    if (exportActivity) params.set('activityId', exportActivity)
+    if (exportConjunction) params.set('conjunctionId', exportConjunction)
+    window.open(`/api/export?${params.toString()}`, '_blank')
   }
 
   // ---------------------------------------------------------------------------
@@ -369,12 +336,25 @@ export function ProjectDetailClient({
             <h1 className="text-2xl font-bold tracking-tight">
               {project.name}
             </h1>
-            <Badge
-              variant="outline"
-              className={statusColors[project.status] || ''}
-            >
-              {project.status}
-            </Badge>
+            {(() => {
+              // Derive display status from batch states
+              const statuses = batches.map((b) => b.status)
+              let displayStatus = project.status
+              if (statuses.length > 0) {
+                if (statuses.every((s) => s === 'COMPLETE')) displayStatus = 'COMPLETE'
+                else if (statuses.some((s) => s === 'RECONCILING')) displayStatus = 'RECONCILIATION'
+                else if (statuses.some((s) => s === 'SCORING')) displayStatus = 'ACTIVE'
+                else displayStatus = 'SETUP'
+              }
+              return (
+                <Badge
+                  variant="outline"
+                  className={statusColors[displayStatus] || ''}
+                >
+                  {displayStatus}
+                </Badge>
+              )
+            })()}
           </div>
           {project.description && (
             <p className="mt-1 text-sm text-muted-foreground">
@@ -466,19 +446,6 @@ export function ProjectDetailClient({
                 </Button>
               )}
 
-              {statusFlow[project.status] && (
-                <Button
-                  onClick={handleStatusChange}
-                  disabled={statusChanging}
-                >
-                  {statusChanging ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <CheckCircle className="mr-2 h-4 w-4" />
-                  )}
-                  {statusActionLabel[project.status]}
-                </Button>
-              )}
             </div>
 
             {/* StudyFlow Integration */}
@@ -777,6 +744,53 @@ export function ProjectDetailClient({
             <p className="text-sm text-muted-foreground">
               Download evaluation scores as CSV files for analysis.
             </p>
+
+            {/* Export filters */}
+            {(() => {
+              const expActivityIds = [...new Set(batches.map((b) => b.activityId).filter(Boolean) as string[])].sort()
+              const expConjunctionIds = [...new Set(
+                batches
+                  .filter((b) => (exportActivity ? b.activityId === exportActivity : true))
+                  .map((b) => b.conjunctionId)
+                  .filter(Boolean) as string[]
+              )].sort()
+              return (
+                <div className="flex items-center gap-3">
+                  <span className="text-sm font-medium text-muted-foreground">Filter:</span>
+                  <select
+                    className="flex h-8 rounded-md border border-input bg-background px-2 py-1 text-sm shadow-sm transition-colors"
+                    value={exportActivity}
+                    onChange={(e) => {
+                      setExportActivity(e.target.value)
+                      setExportConjunction('')
+                    }}
+                  >
+                    <option value="">All activities</option>
+                    {expActivityIds.map((id) => (
+                      <option key={id} value={id}>Activity {id}</option>
+                    ))}
+                  </select>
+                  <select
+                    className="flex h-8 rounded-md border border-input bg-background px-2 py-1 text-sm shadow-sm transition-colors"
+                    value={exportConjunction}
+                    onChange={(e) => setExportConjunction(e.target.value)}
+                  >
+                    <option value="">All conjunctions</option>
+                    {expConjunctionIds.map((id) => (
+                      <option key={id} value={id}>{id}</option>
+                    ))}
+                  </select>
+                  {(exportActivity || exportConjunction) && (
+                    <button
+                      onClick={() => { setExportActivity(''); setExportConjunction('') }}
+                      className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      Clear filters
+                    </button>
+                  )}
+                </div>
+              )
+            })()}
 
             <div className="grid gap-4 sm:grid-cols-2">
               <Card>

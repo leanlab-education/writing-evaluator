@@ -3,8 +3,8 @@
   "configurations": [
     {
       "name": "next-dev",
-      "runtimeExecutable": "/opt/homebrew/bin/node",
-      "runtimeArgs": ["/opt/homebrew/bin/npx", "next", "dev"],
+      "runtimeExecutable": "/opt/homebrew/bin/doppler",
+      "runtimeArgs": ["run", "--project", "writing-evaluator", "--config", "dev", "--", "npx", "next", "dev"],
       "port": 3000,
       "env": {
         "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"

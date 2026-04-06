@@ -58,11 +58,14 @@ export async function POST(
 
   const assignedCount = created.filter(Boolean).length
 
-  // Mark batch as assigned
+  // Mark batch as assigned + auto-transition DRAFT → SCORING
   if (assignedCount > 0) {
     await prisma.batch.update({
       where: { id: batchId },
-      data: { isAssigned: true },
+      data: {
+        isAssigned: true,
+        ...(batch.status === 'DRAFT' ? { status: 'SCORING' } : {}),
+      },
     })
   }
 
