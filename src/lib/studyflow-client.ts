@@ -30,6 +30,11 @@ async function signRequest(studyId: string): Promise<string> {
 }
 
 export async function fetchStudyFlowParticipants(studyId: string): Promise<StudyFlowParticipant[]> {
+  // Validate studyId to prevent path traversal
+  if (!/^[a-zA-Z0-9_-]+$/.test(studyId)) {
+    throw new Error('Invalid studyId format')
+  }
+
   const token = await signRequest(studyId)
   const url = `${getApiUrl()}/api/studies/${studyId}/participants`
 

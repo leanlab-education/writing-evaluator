@@ -41,6 +41,14 @@ export function ImportClient({ projectId }: { projectId: string }) {
   function processFile(file: File) {
     setImportResult(null)
     setImportError('')
+
+    // Reject files larger than 10MB to prevent client-side memory issues
+    const MAX_CSV_SIZE = 10 * 1024 * 1024
+    if (file.size > MAX_CSV_SIZE) {
+      setErrors(['File too large. Maximum size is 10MB.'])
+      return
+    }
+
     setFileName(file.name)
 
     const reader = new FileReader()

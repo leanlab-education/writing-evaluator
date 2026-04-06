@@ -10,7 +10,14 @@ async function verifyStudyFlowToken(token: string, email: string) {
 
   try {
     const key = new TextEncoder().encode(secret)
-    const { payload } = await jwtVerify(token, key)
+    const { payload } = await jwtVerify(token, key, {
+      maxTokenAge: '10m', // Reject tokens older than 10 minutes even if exp is far out
+      issuer: 'studyflow',
+      audience: 'writing-evaluator',
+    })
+
+    // Require an expiration claim — reject tokens without one
+    if (!payload.exp) return null
 
     // Verify email matches
     if (payload.email !== email) return null
@@ -19,6 +26,7 @@ async function verifyStudyFlowToken(token: string, email: string) {
       email: payload.email as string,
       name: payload.name as string | undefined,
       projectId: payload.project_id as string | undefined,
+      studyId: payload.study_id as string | undefined,
     }
   } catch {
     return null
@@ -74,10 +82,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
                 update: {},
               })
             }
-          } else {
-            // No project_id in JWT — assign to all StudyFlow-linked projects
+          } else if (verified.studyId) {
+            // No project_id but has study_id — assign to projects linked to this specific study
             const studyflowProjects = await prisma.project.findMany({
-              where: { studyflowStudyId: { not: null } },
+              where: { studyflowStudyId: verified.studyId },
               select: { id: true },
             })
             for (const project of studyflowProjects) {
@@ -115,9 +123,15 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         pathname === '/login' ||
         pathname.startsWith('/invite/') ||
         pathname.startsWith('/reset-password')
-      const isApiRoute = pathname.startsWith('/api/')
 
-      if (isApiRoute) return true
+      // Public API routes that don't require authentication
+      const isPublicApiRoute =
+        pathname.startsWith('/api/auth/') ||
+        pathname === '/api/invite/accept' ||
+        pathname === '/api/reset-password' ||
+        pathname === '/api/reset-password/accept'
+
+      if (isPublicApiRoute) return true
       if (pathname === '/login' && isLoggedIn) {
         return Response.redirect(new URL('/', request.url))
       }
@@ -145,5 +159,6 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   },
   session: {
     strategy: 'jwt',
+    maxAge: 8 * 60 * 60, // 8 hours
   },
 })

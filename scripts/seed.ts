@@ -4,6 +4,11 @@ import { PrismaNeon } from '@prisma/adapter-neon'
 import { hash } from 'bcryptjs'
 
 async function main() {
+  if (process.env.NODE_ENV === 'production' || process.env.VERCEL_ENV === 'production') {
+    console.error('ERROR: Seed script cannot run against production. Aborting.')
+    process.exit(1)
+  }
+
   const adapter = new PrismaNeon({
     connectionString: process.env.DATABASE_URL!,
   })

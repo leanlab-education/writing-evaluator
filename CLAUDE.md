@@ -38,6 +38,9 @@ npm run lint         # ESLint
 npx prisma generate  # Regenerate Prisma client after schema changes
 npx prisma db push   # Push schema changes to Neon (no migration files)
 npx tsx scripts/seed.ts  # Seed admin + test evaluator users
+
+# Running doppler CLI directly (outside npm scripts) requires project/config flags:
+doppler run -p writing-evaluator -c dev -- <command>
 ```
 
 ## Database
@@ -82,14 +85,19 @@ Key relationships:
 
 - **Auth.js v5** with Credentials provider (email + bcrypt password)
 - **JWT strategy** (no database sessions)
-- **Auth callback** in `auth.ts` protects all routes except `/login`, `/invite/*`, `/reset-password/*`, and `/api/*`
+- **Auth callback** in `auth.ts` protects all routes except `/login`, `/invite/*`, `/reset-password/*`, and specific public API routes (`/api/auth/*`, `/api/invite/accept`, `/api/reset-password/*`)
 - **Role check**: Server components use `const session = await auth()` then check `session.user.role`
 - **Roles**: `ADMIN` (manages projects, imports data, configures rubrics) and `EVALUATOR` (scores items)
 - **Magic link login**: StudyFlow sends users to `/login?studyflow_token=...&email=...` — the login page auto-verifies the JWT and creates/finds the evaluator account
 - **Email invite flow**: Admin enters email → Resend sends invite → user clicks link → sets password at `/invite/[token]`
 - **Password reset**: Email-based reset link at `/reset-password`
 
-### Test Accounts
+- **Session timeout**: 8 hours (JWT maxAge)
+- **Password policy**: Minimum 8 characters
+- **Security headers**: CSP, HSTS, X-Frame-Options, nosniff, Referrer-Policy, Permissions-Policy (configured in `next.config.ts`)
+- **Score validation**: Server-side validation of score values against rubric scale, dimensionId against project, and batch status (must be SCORING or RECONCILING)
+
+### Test Accounts (dev-only — seed script refuses to run in production)
 | Email | Password | Role |
 |-------|----------|------|
 | admin@leanlab.org | admin123 | ADMIN |
@@ -226,7 +234,7 @@ APP_URL                     # This app's public URL (used in email links)
 
 **Study-specific** — only the Quill - Evaluators study uses this integration.
 
-- **Magic link login**: StudyFlow signs a JWT with `STUDYFLOW_LINK_SECRET` containing `email`, `name`, `study_id`, `purpose`. Writing Evaluator verifies the JWT at `/login` and auto-creates evaluator accounts.
+- **Magic link login**: StudyFlow signs a JWT with `STUDYFLOW_LINK_SECRET` containing `email`, `name`, `project_id`. Writing Evaluator verifies the JWT at `/login` (requires `exp`, enforces 10-min `maxTokenAge`, validates `issuer: 'studyflow'` + `audience: 'writing-evaluator'`) and auto-creates evaluator accounts. **TODO**: StudyFlow side needs to add `.setIssuer('studyflow').setAudience('writing-evaluator')` to `generateWritingEvaluatorLink()` in `studyflow/src/lib/writing-evaluator.ts` — until then, magic link login will fail.
 - **Participant import**: Writing Evaluator can fetch active participants from StudyFlow via signed JWT to `STUDYFLOW_API_URL/api/studies/{studyId}/participants`. Admin uses "Import from StudyFlow" on the Evaluators tab.
 - **Study linking**: Each project has an optional `studyflowStudyId` field (set in Overview tab) that connects it to a StudyFlow study.
 - **Shared secret**: `STUDYFLOW_LINK_SECRET` must be the same value in both projects.
@@ -237,9 +245,25 @@ APP_URL                     # This app's public URL (used in email links)
 - **Production URL**: `https://writing-evaluator.vercel.app`
 - **Env vars**: Managed directly in Vercel (not Doppler — migration pending)
 
+## Security
+
+- **ASVS 5.0 Level 2 audit**: `docs/ASVS-L2-AUDIT-2026-04-06.md` — 65% PASS, 17% FAIL, 11% PARTIAL
+- **CSV export**: Formula injection protection in `csvEscape()` (prefixes `=+-@\t\r`)
+- **Blinding shuffle**: Uses `crypto.randomInt()` (CSPRNG), not `Math.random()`
+- **API authorization**: All endpoints enforce auth at middleware level + role/membership checks per route
+- **StudyFlow client**: `studyId` validated against `^[a-zA-Z0-9_-]+$` to prevent path traversal
+
 ## Remaining TODO
 
 - [ ] Connect to Replit for non-engineer access
+- [ ] **StudyFlow JWT iss/aud**: Add `.setIssuer('studyflow').setAudience('writing-evaluator')` to StudyFlow's `generateWritingEvaluatorLink()` — required before deploying this branch
+- [ ] **MFA**: Build opt-in TOTP (deferred — ASVS L2 requirement, planned as opt-in per user)
+- [ ] **Rate limiting**: Add to login, password reset, invite endpoints (use `@upstash/ratelimit` or similar)
+- [ ] **Server-side logging**: Add pino with security event coverage (auth, authz failures, exports)
+- [ ] **Audit logging**: AuditLog model for export/unblinding events and admin actions
+- [ ] **Token revocation**: Add `tokenVersion` to User model for JWT invalidation on password change/account disable
+- [ ] **Common password check**: Check against top 3000 passwords on password set
+- [ ] **Breach password check**: HIBP k-anonymity API integration
 
 ## People
 

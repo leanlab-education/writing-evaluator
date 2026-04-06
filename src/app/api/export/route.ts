@@ -243,6 +243,10 @@ export async function GET(request: NextRequest) {
 }
 
 function csvEscape(value: string): string {
+  // Defend against CSV formula injection — prefix dangerous leading characters
+  if (/^[=+\-@\t\r]/.test(value)) {
+    value = `'${value}`
+  }
   if (value.includes(',') || value.includes('"') || value.includes('\n')) {
     return `"${value.replace(/"/g, '""')}"`
   }

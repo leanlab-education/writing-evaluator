@@ -14,6 +14,16 @@ export async function GET(
 
   const { projectId } = await params
 
+  // Evaluators can only access projects they're assigned to
+  if (session.user.role !== 'ADMIN') {
+    const membership = await prisma.projectEvaluator.findUnique({
+      where: { projectId_userId: { projectId, userId: session.user.id } },
+    })
+    if (!membership) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+  }
+
   const batches = await prisma.batch.findMany({
     where: { projectId },
     include: {
@@ -229,10 +239,11 @@ async function randomizeDisplayOrder(batchId: string) {
     select: { id: true },
   })
 
-  // Fisher-Yates shuffle of indices
+  // Fisher-Yates shuffle using CSPRNG (blinding-critical randomness)
+  const { randomInt } = await import('crypto')
   const indices = items.map((_, i) => i)
   for (let i = indices.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1))
+    const j = randomInt(i + 1)
     ;[indices[i], indices[j]] = [indices[j], indices[i]]
   }
 

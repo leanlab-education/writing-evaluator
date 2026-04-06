@@ -20,6 +20,16 @@ export async function GET(request: NextRequest) {
   const batchId = request.nextUrl.searchParams.get('batchId')
   const isAdmin = session.user.role === 'ADMIN'
 
+  // Evaluators can only access projects they're assigned to
+  if (!isAdmin) {
+    const membership = await prisma.projectEvaluator.findUnique({
+      where: { projectId_userId: { projectId, userId: session.user.id } },
+    })
+    if (!membership) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+  }
+
   // Base query: feedback items without feedbackSource (blinded)
   const feedbackItems = await prisma.feedbackItem.findMany({
     where: {

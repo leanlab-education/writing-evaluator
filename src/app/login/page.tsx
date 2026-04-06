@@ -41,8 +41,11 @@ function LoginForm() {
         if (result?.error) {
           setAutoLogging(false)
           setError('StudyFlow login failed. Please sign in manually.')
+          // Strip the token from browser history so it can't be reused
+          window.history.replaceState({}, '', '/login')
         } else {
-          router.push('/')
+          // Replace (not push) so the token URL is removed from browser history
+          router.replace('/')
         }
       })
     }

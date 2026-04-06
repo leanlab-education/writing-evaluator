@@ -19,6 +19,16 @@ export async function GET(request: NextRequest) {
   const feedbackItemId = request.nextUrl.searchParams.get('feedbackItemId')
   const isAdmin = session.user.role === 'ADMIN'
 
+  // Evaluators can only access projects they're assigned to
+  if (!isAdmin) {
+    const membership = await prisma.projectEvaluator.findUnique({
+      where: { projectId_userId: { projectId, userId: session.user.id } },
+    })
+    if (!membership) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+  }
+
   const scores = await prisma.score.findMany({
     where: {
       feedbackItem: { projectId },
@@ -56,15 +66,50 @@ export async function POST(request: Request) {
     )
   }
 
-  // Verify the feedback item exists
+  // Verify the feedback item exists and user has access to its project
   const feedbackItem = await prisma.feedbackItem.findUnique({
     where: { id: feedbackItemId },
+    select: { id: true, projectId: true, batchId: true },
   })
   if (!feedbackItem) {
     return NextResponse.json(
       { error: 'Feedback item not found' },
       { status: 404 }
     )
+  }
+
+  const membership = await prisma.projectEvaluator.findUnique({
+    where: { projectId_userId: { projectId: feedbackItem.projectId, userId: session.user.id } },
+  })
+  if (!membership) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+
+  // Verify batch is in a scoreable state
+  if (feedbackItem.batchId) {
+    const batch = await prisma.batch.findUnique({
+      where: { id: feedbackItem.batchId },
+      select: { status: true },
+    })
+    if (!batch || !['SCORING', 'RECONCILING'].includes(batch.status)) {
+      return NextResponse.json({ error: 'Scoring is not open for this batch' }, { status: 403 })
+    }
+  }
+
+  // Validate each score's dimensionId belongs to this project and value is within scale
+  const dimensions = await prisma.rubricDimension.findMany({
+    where: { projectId: feedbackItem.projectId },
+    select: { id: true, scaleMin: true, scaleMax: true },
+  })
+  const dimMap = new Map(dimensions.map((d) => [d.id, d]))
+  for (const score of scores as { dimensionId: string; value: number }[]) {
+    const dim = dimMap.get(score.dimensionId)
+    if (!dim) {
+      return NextResponse.json({ error: `Invalid dimension: ${score.dimensionId}` }, { status: 400 })
+    }
+    if (score.value < dim.scaleMin || score.value > dim.scaleMax) {
+      return NextResponse.json({ error: `Score value must be between ${dim.scaleMin} and ${dim.scaleMax}` }, { status: 400 })
+    }
   }
 
   // Create all score rows in a transaction
@@ -121,6 +166,50 @@ export async function PUT(request: Request) {
       { error: 'feedbackItemId is required' },
       { status: 400 }
     )
+  }
+
+  // Verify the feedback item exists and user has access to its project
+  const feedbackItem = await prisma.feedbackItem.findUnique({
+    where: { id: feedbackItemId },
+    select: { projectId: true, batchId: true },
+  })
+  if (!feedbackItem) {
+    return NextResponse.json({ error: 'Feedback item not found' }, { status: 404 })
+  }
+  const putMembership = await prisma.projectEvaluator.findUnique({
+    where: { projectId_userId: { projectId: feedbackItem.projectId, userId: session.user.id } },
+  })
+  if (!putMembership) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+
+  // Verify batch is in a scoreable state
+  if (feedbackItem.batchId) {
+    const batch = await prisma.batch.findUnique({
+      where: { id: feedbackItem.batchId },
+      select: { status: true },
+    })
+    if (!batch || !['SCORING', 'RECONCILING'].includes(batch.status)) {
+      return NextResponse.json({ error: 'Scoring is not open for this batch' }, { status: 403 })
+    }
+  }
+
+  // Validate score dimensions and values if scores are provided
+  if (Array.isArray(scores) && scores.length > 0) {
+    const dimensions = await prisma.rubricDimension.findMany({
+      where: { projectId: feedbackItem.projectId },
+      select: { id: true, scaleMin: true, scaleMax: true },
+    })
+    const dimMap = new Map(dimensions.map((d) => [d.id, d]))
+    for (const score of scores as { dimensionId: string; value: number }[]) {
+      const dim = dimMap.get(score.dimensionId)
+      if (!dim) {
+        return NextResponse.json({ error: `Invalid dimension: ${score.dimensionId}` }, { status: 400 })
+      }
+      if (score.value < dim.scaleMin || score.value > dim.scaleMax) {
+        return NextResponse.json({ error: `Score value must be between ${dim.scaleMin} and ${dim.scaleMax}` }, { status: 400 })
+      }
+    }
   }
 
   // Upsert each score dimension — run sequentially to avoid race conditions
