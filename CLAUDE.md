@@ -160,13 +160,14 @@ src/
 
 ## Key Workflows
 
-### Admin: Create Project → Import → Configure → Activate
+### Admin: Create Project → Import → Configure → Assign
 1. Admin creates project at `/admin` → project starts in SETUP status
 2. Admin imports CSV at `/admin/[id]/import` — CSV columns: `Response_ID, Student_ID, Cycle_ID, Activity_ID, Conjunction_ID, Student_Text, Feedback_Source, Teacher_ID, Feedback_Text, optimal, feedback_type, Feedback_ID`
 3. Rubric auto-created from `DEFAULT_RUBRIC` template (8 generic criteria, 1-3 scale each)
-4. Admin adds evaluators (existing users) and assigns all items
-5. Admin changes status to ACTIVE → evaluators can now score
-6. After scoring: RECONCILIATION → resolve discrepancies → COMPLETE → export CSV
+4. Admin creates batches (filtered by activity/conjunction), adds evaluators to batches
+5. Batches auto-transition to SCORING when evaluators are assigned — no global "activate" step
+6. Admin manages each batch independently: DRAFT → SCORING → RECONCILING → COMPLETE
+7. Export CSV at any time, optionally filtered by Activity ID / Conjunction ID
 
 ### Evaluator: Score Items
 1. Evaluator logs in → sees assigned projects at `/`
