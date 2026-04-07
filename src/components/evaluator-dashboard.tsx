@@ -20,6 +20,8 @@ interface BatchInfo {
   status: string
   itemCount: number
   scoredCount: number
+  discrepancyCount?: number
+  reconciledCount?: number
 }
 
 interface TeamInfo {
@@ -152,11 +154,32 @@ export function EvaluatorDashboard({
                                     {batch.name}
                                   </span>
                                   <span className="text-xs text-muted-foreground">
-                                    {batch.scoredCount}/{batch.itemCount}
+                                    {batch.status === 'RECONCILING' && batch.discrepancyCount != null
+                                      ? `${batch.reconciledCount ?? 0}/${batch.discrepancyCount} reconciled`
+                                      : `${batch.scoredCount}/${batch.itemCount}`}
                                   </span>
                                 </div>
-                                <Progress value={batchPct} />
+                                <Progress
+                                  value={
+                                    batch.status === 'RECONCILING' && batch.discrepancyCount
+                                      ? Math.round(((batch.reconciledCount ?? 0) / batch.discrepancyCount) * 100)
+                                      : batchPct
+                                  }
+                                />
                               </div>
+                              {batch.status === 'RECONCILING' ? (
+                                <Button
+                                  size="sm"
+                                  variant="default"
+                                  onClick={() =>
+                                    router.push(
+                                      `/reconcile/${ep.project.id}?batchId=${batch.id}`
+                                    )
+                                  }
+                                >
+                                  Reconcile
+                                </Button>
+                              ) : (
                               <Button
                                 size="sm"
                                 variant={batchComplete ? 'outline' : 'default'}
@@ -180,6 +203,7 @@ export function EvaluatorDashboard({
                                       ? 'Continue'
                                       : 'Start'}
                               </Button>
+                              )}
                             </div>
                           )
                         })}

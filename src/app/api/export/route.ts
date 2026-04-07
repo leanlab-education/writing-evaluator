@@ -24,11 +24,24 @@ export async function GET(request: NextRequest) {
     )
   }
 
-  if (type !== 'original' && type !== 'reconciled') {
+  if (type !== 'original' && type !== 'reconciled' && type !== 'discrepancies') {
     return NextResponse.json(
-      { error: 'type must be "original" or "reconciled"' },
+      { error: 'type must be "original", "reconciled", or "discrepancies"' },
       { status: 400 }
     )
+  }
+
+  // Discrepancy export requires a batchId
+  const batchId = request.nextUrl.searchParams.get('batchId')
+  if (type === 'discrepancies' && !batchId) {
+    return NextResponse.json(
+      { error: 'batchId is required for discrepancy export' },
+      { status: 400 }
+    )
+  }
+
+  if (type === 'discrepancies') {
+    return handleDiscrepancyExport(projectId, batchId!)
   }
 
   // Get rubric dimensions for column headers
@@ -232,6 +245,115 @@ export async function GET(request: NextRequest) {
   if (activityId) filterParts.push(`activity-${activityId}`)
   if (conjunctionId) filterParts.push(`conj-${conjunctionId}`)
   const filename = `scores-${filterParts.join('-')}-${new Date().toISOString().split('T')[0]}.csv`
+
+  return new Response(csv, {
+    status: 200,
+    headers: {
+      'Content-Type': 'text/csv',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+    },
+  })
+}
+
+async function handleDiscrepancyExport(projectId: string, batchId: string) {
+  const batch = await prisma.batch.findUnique({
+    where: { id: batchId },
+    select: { name: true, projectId: true },
+  })
+
+  if (!batch || batch.projectId !== projectId) {
+    return NextResponse.json({ error: 'Batch not found' }, { status: 404 })
+  }
+
+  // Fetch all original scores for this batch
+  const scores = await prisma.score.findMany({
+    where: {
+      feedbackItem: { batchId },
+      isReconciled: false,
+    },
+    include: {
+      feedbackItem: {
+        select: {
+          responseId: true,
+          studentId: true,
+          activityId: true,
+          conjunctionId: true,
+          feedbackId: true,
+        },
+      },
+      user: { select: { email: true } },
+      dimension: { select: { key: true, label: true } },
+    },
+  })
+
+  // Group by (feedbackItemId, dimensionId) and find discrepancies
+  const groups = new Map<
+    string,
+    {
+      feedbackItem: (typeof scores)[0]['feedbackItem']
+      dimension: (typeof scores)[0]['dimension']
+      evaluators: { email: string; value: number }[]
+    }
+  >()
+
+  for (const score of scores) {
+    const key = `${score.feedbackItemId}::${score.dimensionId}`
+    if (!groups.has(key)) {
+      groups.set(key, {
+        feedbackItem: score.feedbackItem,
+        dimension: score.dimension,
+        evaluators: [],
+      })
+    }
+    groups.get(key)!.evaluators.push({
+      email: score.user.email,
+      value: score.value,
+    })
+  }
+
+  const headerRow = [
+    'Response_ID',
+    'Student_ID',
+    'Activity_ID',
+    'Conjunction_ID',
+    'Feedback_ID',
+    'Dimension_Key',
+    'Dimension_Label',
+    'Evaluator_A_Email',
+    'Evaluator_A_Score',
+    'Evaluator_B_Email',
+    'Evaluator_B_Score',
+    'Difference',
+  ]
+
+  const csvRows = [headerRow.join(',')]
+
+  for (const [, group] of groups) {
+    const evals = group.evaluators
+    if (evals.length !== 2) continue
+    if (evals[0].value === evals[1].value) continue
+
+    csvRows.push(
+      [
+        csvEscape(group.feedbackItem.responseId || ''),
+        csvEscape(group.feedbackItem.studentId),
+        csvEscape(group.feedbackItem.activityId || ''),
+        csvEscape(group.feedbackItem.conjunctionId || ''),
+        csvEscape(group.feedbackItem.feedbackId),
+        csvEscape(group.dimension.key),
+        csvEscape(group.dimension.label),
+        csvEscape(evals[0].email),
+        String(evals[0].value),
+        csvEscape(evals[1].email),
+        String(evals[1].value),
+        String(Math.abs(evals[0].value - evals[1].value)),
+      ].join(',')
+    )
+  }
+
+  const csv = csvRows.join('\n')
+  const safeBatchName = (batch.name || 'batch').replace(/[^a-zA-Z0-9_-]/g, '-')
+  const filename = `discrepancies-${safeBatchName}-${new Date().toISOString().split('T')[0]}.csv`
 
   return new Response(csv, {
     status: 200,

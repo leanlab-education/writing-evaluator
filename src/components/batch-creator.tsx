@@ -49,6 +49,8 @@ interface BatchRow {
   sortOrder: number
   itemCount: number
   scoredItemCount: number
+  discrepancyCount?: number
+  reconciledCount?: number
   evaluators: BatchEvaluator[]
   type?: string
 }
@@ -576,7 +578,9 @@ export function BatchCreator({
                         <option value="COMPLETE">Complete</option>
                       </select>
                       <Badge variant="outline">
-                        {batch.scoredItemCount}/{batch.itemCount} scored ({pct}%)
+                        {batch.status === 'RECONCILING' && batch.discrepancyCount != null
+                          ? `${batch.reconciledCount ?? 0}/${batch.discrepancyCount} reconciled`
+                          : `${batch.scoredItemCount}/${batch.itemCount} scored (${pct}%)`}
                       </Badge>
                     </div>
                   </div>

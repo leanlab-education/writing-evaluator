@@ -61,7 +61,7 @@ export default async function HomePage() {
   // Group batch assignments by projectId and count scored items
   const batchesByProject = new Map<
     string,
-    { id: string; name: string; status: string; itemCount: number; scoredCount: number }[]
+    { id: string; name: string; status: string; itemCount: number; scoredCount: number; discrepancyCount?: number; reconciledCount?: number }[]
   >()
 
   for (const ba of batchAssignments) {
@@ -75,12 +75,38 @@ export default async function HomePage() {
       },
     })
 
+    // For RECONCILING batches, compute discrepancy stats
+    let discrepancyCount: number | undefined
+    let reconciledCount: number | undefined
+    if (ba.batch.status === 'RECONCILING') {
+      // Count original scores grouped by (feedbackItemId, dimensionId) with 2 evaluators that disagree
+      const originalScores = await prisma.score.findMany({
+        where: { feedbackItem: { batchId: ba.batch.id }, isReconciled: false },
+        select: { feedbackItemId: true, dimensionId: true, value: true },
+      })
+      const groups = new Map<string, number[]>()
+      for (const s of originalScores) {
+        const key = `${s.feedbackItemId}::${s.dimensionId}`
+        if (!groups.has(key)) groups.set(key, [])
+        groups.get(key)!.push(s.value)
+      }
+      discrepancyCount = 0
+      for (const [, values] of groups) {
+        if (values.length === 2 && values[0] !== values[1]) discrepancyCount++
+      }
+      reconciledCount = await prisma.score.count({
+        where: { feedbackItem: { batchId: ba.batch.id }, isReconciled: true },
+      })
+    }
+
     batchesByProject.get(pid)!.push({
       id: ba.batch.id,
       name: ba.batch.name,
       status: ba.batch.status,
       itemCount: ba.batch._count.feedbackItems,
       scoredCount,
+      discrepancyCount,
+      reconciledCount,
     })
   }
 

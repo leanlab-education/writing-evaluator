@@ -65,6 +65,29 @@ export async function GET(
           .size
       }
 
+      // For RECONCILING batches, compute discrepancy stats
+      let discrepancyCount: number | undefined
+      let reconciledCount: number | undefined
+      if (batch.status === 'RECONCILING') {
+        const origScores = await prisma.score.findMany({
+          where: { feedbackItem: { batchId: batch.id }, isReconciled: false },
+          select: { feedbackItemId: true, dimensionId: true, value: true },
+        })
+        const scoreGroups = new Map<string, number[]>()
+        for (const s of origScores) {
+          const key = `${s.feedbackItemId}::${s.dimensionId}`
+          if (!scoreGroups.has(key)) scoreGroups.set(key, [])
+          scoreGroups.get(key)!.push(s.value)
+        }
+        discrepancyCount = 0
+        for (const [, values] of scoreGroups) {
+          if (values.length === 2 && values[0] !== values[1]) discrepancyCount++
+        }
+        reconciledCount = await prisma.score.count({
+          where: { feedbackItem: { batchId: batch.id }, isReconciled: true },
+        })
+      }
+
       return {
         id: batch.id,
         name: batch.name,
@@ -77,6 +100,8 @@ export async function GET(
         createdAt: batch.createdAt,
         itemCount: batch._count.feedbackItems,
         scoredItemCount,
+        discrepancyCount,
+        reconciledCount,
         evaluators: batch.assignments.map((a) => ({
           ...a.user,
           scoringRole: a.scoringRole,

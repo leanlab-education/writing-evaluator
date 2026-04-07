@@ -24,6 +24,11 @@ import {
   ArrowLeft,
 } from 'lucide-react'
 import { AppShell } from '@/components/app-shell'
+import {
+  buildNavWindow,
+  getScoreColor,
+  getSelectedScoreColor,
+} from '@/lib/scoring-utils'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -91,53 +96,6 @@ function parseScoreLabels(
 
 // Build a windowed list of indices + ellipsis markers for navigation
 // e.g. [0, '...', 44, 45, 46, 47, 48, '...', 2099]
-function buildNavWindow(
-  current: number,
-  total: number,
-  wing: number
-): (number | '...')[] {
-  if (total <= wing * 2 + 3) {
-    return Array.from({ length: total }, (_, i) => i)
-  }
-  const result: (number | '...')[] = []
-  const start = Math.max(1, current - wing)
-  const end = Math.min(total - 2, current + wing)
-
-  result.push(0)
-  if (start > 1) result.push('...')
-  for (let i = start; i <= end; i++) result.push(i)
-  if (end < total - 2) result.push('...')
-  result.push(total - 1)
-
-  return result
-}
-
-function getScoreColor(value: number, min: number, max: number): string {
-  if (max === min)
-    return 'border-score-mid-border bg-score-mid-bg text-score-mid-text'
-  const ratio = (value - min) / (max - min)
-  if (ratio <= 0.25)
-    return 'border-score-low-border bg-score-low-bg text-score-low-text'
-  if (ratio < 0.75)
-    return 'border-score-mid-border bg-score-mid-bg text-score-mid-text'
-  return 'border-score-high-border bg-score-high-bg text-score-high-text'
-}
-
-function getSelectedScoreColor(
-  value: number,
-  min: number,
-  max: number
-): string {
-  if (max === min)
-    return 'bg-score-mid-solid text-white border-score-mid-solid'
-  const ratio = (value - min) / (max - min)
-  if (ratio <= 0.25)
-    return 'bg-score-low-solid text-white border-score-low-solid'
-  if (ratio < 0.75)
-    return 'bg-score-mid-solid text-white border-score-mid-solid'
-  return 'bg-score-high-solid text-white border-score-high-solid'
-}
-
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
