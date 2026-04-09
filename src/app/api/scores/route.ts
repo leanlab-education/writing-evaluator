@@ -1,5 +1,6 @@
 import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/db'
+import { maybeAutoTransitionToReconciling } from '@/lib/reconciliation'
 import { NextRequest, NextResponse } from 'next/server'
 
 export async function GET(request: NextRequest) {
@@ -85,13 +86,16 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
-  // Verify batch is in a scoreable state
+  // Verify batch is in a scoreable state and not hidden from this user
   if (feedbackItem.batchId) {
     const batch = await prisma.batch.findUnique({
       where: { id: feedbackItem.batchId },
-      select: { status: true },
+      select: { status: true, isHidden: true },
     })
     if (!batch || !['SCORING', 'RECONCILING'].includes(batch.status)) {
+      return NextResponse.json({ error: 'Scoring is not open for this batch' }, { status: 403 })
+    }
+    if (batch.isHidden && session.user.role !== 'ADMIN') {
       return NextResponse.json({ error: 'Scoring is not open for this batch' }, { status: 403 })
     }
   }
@@ -148,6 +152,17 @@ export async function POST(request: Request) {
     return createdScores
   })
 
+  // After a successful save, check whether this batch is now fully scored
+  // by every evaluator. If so, auto-transition SCORING → RECONCILING.
+  // Fire-and-forget: failure here must not break the save response.
+  if (feedbackItem.batchId) {
+    try {
+      await maybeAutoTransitionToReconciling(feedbackItem.batchId)
+    } catch (err) {
+      console.error('Auto-transition check failed:', err)
+    }
+  }
+
   return NextResponse.json(result, { status: 201 })
 }
 
@@ -183,13 +198,16 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
-  // Verify batch is in a scoreable state
+  // Verify batch is in a scoreable state and not hidden from this user
   if (feedbackItem.batchId) {
     const batch = await prisma.batch.findUnique({
       where: { id: feedbackItem.batchId },
-      select: { status: true },
+      select: { status: true, isHidden: true },
     })
     if (!batch || !['SCORING', 'RECONCILING'].includes(batch.status)) {
+      return NextResponse.json({ error: 'Scoring is not open for this batch' }, { status: 403 })
+    }
+    if (batch.isHidden && session.user.role !== 'ADMIN') {
       return NextResponse.json({ error: 'Scoring is not open for this batch' }, { status: 403 })
     }
   }
@@ -274,6 +292,16 @@ export async function PUT(request: Request) {
       },
       data: { notes },
     })
+  }
+
+  // After a successful auto-save, check whether this batch is now fully
+  // scored by every evaluator. If so, auto-transition SCORING → RECONCILING.
+  if (feedbackItem.batchId) {
+    try {
+      await maybeAutoTransitionToReconciling(feedbackItem.batchId)
+    } catch (err) {
+      console.error('Auto-transition check failed:', err)
+    }
   }
 
   return NextResponse.json({ saved: true })

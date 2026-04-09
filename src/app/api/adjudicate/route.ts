@@ -1,0 +1,271 @@
+import { auth } from '@/lib/auth'
+import { prisma } from '@/lib/db'
+import { NextRequest, NextResponse } from 'next/server'
+
+// GET /api/adjudicate
+// Lists all open (unresolved) escalations across every batch where the
+// current user is the adjudicator. Used by the /adjudicate queue view.
+// Admins can also see all open escalations across the system.
+export async function GET(_request: NextRequest) {
+  const session = await auth()
+  if (!session?.user) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  const isAdmin = session.user.role === 'ADMIN'
+
+  const escalations = await prisma.escalation.findMany({
+    where: {
+      resolvedAt: null,
+      ...(isAdmin ? {} : { batch: { adjudicatorId: session.user.id } }),
+    },
+    include: {
+      batch: {
+        select: {
+          id: true,
+          name: true,
+          projectId: true,
+          adjudicatorId: true,
+          project: { select: { id: true, name: true } },
+        },
+      },
+      feedbackItem: {
+        select: {
+          id: true,
+          studentText: true,
+          feedbackText: true,
+          activityId: true,
+          conjunctionId: true,
+          displayOrder: true,
+        },
+      },
+      dimension: {
+        select: {
+          id: true,
+          key: true,
+          label: true,
+          description: true,
+          sortOrder: true,
+          scaleMin: true,
+          scaleMax: true,
+          scoreLabelJson: true,
+        },
+      },
+      escalatedBy: { select: { id: true, name: true, email: true } },
+    },
+    orderBy: { createdAt: 'asc' },
+  })
+
+  if (escalations.length === 0) {
+    return NextResponse.json({ items: [] })
+  }
+
+  // For each escalation, pull the two coders' original scores + notes on
+  // that (item, dimension), plus the pair's current reconciliation notes
+  // (on the isReconciled Score row, if any).
+  const itemIds = Array.from(new Set(escalations.map((e) => e.feedbackItemId)))
+  const dimensionIds = Array.from(new Set(escalations.map((e) => e.dimensionId)))
+
+  const originalScores = await prisma.score.findMany({
+    where: {
+      feedbackItemId: { in: itemIds },
+      dimensionId: { in: dimensionIds },
+      isReconciled: false,
+    },
+    include: {
+      user: { select: { id: true, name: true, email: true } },
+    },
+  })
+
+  const scoresByKey = new Map<
+    string,
+    {
+      userId: string
+      name: string | null
+      email: string
+      value: number
+      notes: string | null
+    }[]
+  >()
+  for (const s of originalScores) {
+    const key = `${s.feedbackItemId}::${s.dimensionId}`
+    if (!scoresByKey.has(key)) scoresByKey.set(key, [])
+    scoresByKey.get(key)!.push({
+      userId: s.user.id,
+      name: s.user.name,
+      email: s.user.email,
+      value: s.value,
+      notes: s.notes,
+    })
+  }
+
+  // Reconciliation notes — the pair's "Why we decided" text, stored on
+  // isReconciled Score rows (one per dimension they DID resolve).
+  const reconciledScores = await prisma.score.findMany({
+    where: {
+      feedbackItemId: { in: itemIds },
+      isReconciled: true,
+    },
+    select: { feedbackItemId: true, notes: true },
+  })
+  const reconciliationNotesByItem = new Map<string, string>()
+  for (const r of reconciledScores) {
+    if (
+      r.notes &&
+      r.notes.trim() &&
+      !reconciliationNotesByItem.has(r.feedbackItemId)
+    ) {
+      reconciliationNotesByItem.set(r.feedbackItemId, r.notes)
+    }
+  }
+
+  const items = escalations.map((esc) => {
+    const key = `${esc.feedbackItemId}::${esc.dimensionId}`
+    const scores = scoresByKey.get(key) || []
+    return {
+      escalationId: esc.id,
+      batch: esc.batch,
+      feedbackItem: esc.feedbackItem,
+      dimension: esc.dimension,
+      escalatedBy: esc.escalatedBy,
+      createdAt: esc.createdAt,
+      scores,
+      reconciliationNotes:
+        reconciliationNotesByItem.get(esc.feedbackItemId) || null,
+    }
+  })
+
+  return NextResponse.json({ items })
+}
+
+// POST /api/adjudicate
+// Resolve one or more escalations. Writes an isReconciled Score row for
+// each resolved (item, dimension) and marks the Escalation row resolved.
+export async function POST(request: NextRequest) {
+  const session = await auth()
+  if (!session?.user) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  const body = await request.json()
+  const { resolutions } = body as {
+    resolutions?: {
+      escalationId: string
+      value: number
+      notes?: string
+    }[]
+  }
+
+  if (!Array.isArray(resolutions) || resolutions.length === 0) {
+    return NextResponse.json(
+      { error: 'resolutions array is required' },
+      { status: 400 }
+    )
+  }
+
+  const ids = resolutions.map((r) => r.escalationId)
+  const escalations = await prisma.escalation.findMany({
+    where: { id: { in: ids }, resolvedAt: null },
+    include: {
+      batch: { select: { id: true, adjudicatorId: true, status: true } },
+      dimension: { select: { scaleMin: true, scaleMax: true } },
+    },
+  })
+
+  if (escalations.length !== resolutions.length) {
+    return NextResponse.json(
+      { error: 'One or more escalations not found or already resolved' },
+      { status: 400 }
+    )
+  }
+
+  // Authorize: current user must be the adjudicator on every batch touched,
+  // OR an admin.
+  const isAdmin = session.user.role === 'ADMIN'
+  for (const esc of escalations) {
+    if (!isAdmin && esc.batch.adjudicatorId !== session.user.id) {
+      return NextResponse.json(
+        { error: 'You are not the adjudicator for this batch' },
+        { status: 403 }
+      )
+    }
+    if (esc.batch.status !== 'RECONCILING') {
+      return NextResponse.json(
+        { error: 'Batch is not in RECONCILING status' },
+        { status: 400 }
+      )
+    }
+  }
+
+  // Validate each value against the dimension scale
+  const escById = new Map(escalations.map((e) => [e.id, e]))
+  for (const r of resolutions) {
+    const esc = escById.get(r.escalationId)!
+    if (
+      typeof r.value !== 'number' ||
+      r.value < esc.dimension.scaleMin ||
+      r.value > esc.dimension.scaleMax
+    ) {
+      return NextResponse.json(
+        {
+          error: `Score must be ${esc.dimension.scaleMin}-${esc.dimension.scaleMax}`,
+        },
+        { status: 400 }
+      )
+    }
+  }
+
+  // Write reconciled Score rows and mark escalations resolved.
+  // We pick the adjudicator's own userId as the owner of the reconciled
+  // Score row — this keeps provenance clear ("this final score came from
+  // the adjudicator, not the original pair").
+  const now = new Date()
+  for (const r of resolutions) {
+    const esc = escById.get(r.escalationId)!
+
+    // Fetch original scores for reconciledFrom audit trail
+    const originals = await prisma.score.findMany({
+      where: {
+        feedbackItemId: esc.feedbackItemId,
+        dimensionId: esc.dimensionId,
+        isReconciled: false,
+      },
+      select: { id: true },
+    })
+    const reconciledFrom = originals.map((o) => o.id).join(',')
+
+    await prisma.$transaction([
+      prisma.score.upsert({
+        where: {
+          feedbackItemId_userId_dimensionId_isReconciled: {
+            feedbackItemId: esc.feedbackItemId,
+            userId: session.user!.id,
+            dimensionId: esc.dimensionId,
+            isReconciled: true,
+          },
+        },
+        update: {
+          value: r.value,
+          reconciledFrom,
+          notes: r.notes?.trim() || null,
+          scoredAt: now,
+        },
+        create: {
+          feedbackItemId: esc.feedbackItemId,
+          userId: session.user!.id,
+          dimensionId: esc.dimensionId,
+          value: r.value,
+          isReconciled: true,
+          reconciledFrom,
+          notes: r.notes?.trim() || null,
+        },
+      }),
+      prisma.escalation.update({
+        where: { id: esc.id },
+        data: { resolvedById: session.user!.id, resolvedAt: now },
+      }),
+    ])
+  }
+
+  return NextResponse.json({ resolved: resolutions.length })
+}

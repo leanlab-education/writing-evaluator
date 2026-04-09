@@ -44,7 +44,7 @@ export async function GET(request: NextRequest) {
   })
 
   if (!membership) {
-    // No team assignment — evaluator might be in a calibration-only role
+    // No team assignment — evaluator might be in a training-only role
     // or teams haven't been set up yet
     return NextResponse.json(null)
   }

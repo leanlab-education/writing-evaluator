@@ -51,8 +51,11 @@ interface BatchRow {
   scoredItemCount: number
   discrepancyCount?: number
   reconciledCount?: number
+  irrPct?: number | null
   evaluators: BatchEvaluator[]
   type?: string
+  adjudicatorId?: string | null
+  isHidden?: boolean
 }
 
 interface EvaluatorOption {
@@ -87,12 +90,25 @@ export function BatchCreator({
   // Create form state
   const [selectedActivity, setSelectedActivity] = useState<string>('')
   const [selectedConjunction, setSelectedConjunction] = useState<string>('')
+  const [selectedImport, setSelectedImport] = useState<string>('')
   const [batchSize, setBatchSize] = useState('250')
   const [batchName, setBatchName] = useState('')
   const [randomize, setRandomize] = useState(true)
-  const [batchType, setBatchType] = useState<'REGULAR' | 'CALIBRATION'>(
+  const [batchType, setBatchType] = useState<'REGULAR' | 'TRAINING'>(
     'REGULAR'
   )
+
+  // Import history (for the "From import" filter in the create dialog)
+  const [imports, setImports] = useState<
+    {
+      id: string
+      filename: string
+      itemCount: number
+      skippedCount: number
+      unbatchedRemaining: number
+      createdAt: string
+    }[]
+  >([])
 
   // Unbatched stats
   const [unbatchedStats, setUnbatchedStats] = useState<{
@@ -105,12 +121,12 @@ export function BatchCreator({
   const [filterActivity, setFilterActivity] = useState('')
   const [filterConjunction, setFilterConjunction] = useState('')
 
-  // Batch assignment
+  // Batch assignment — per-batch selected evaluator (avoids dropdown state
+  // leaking across tiles when multiple batches are open).
   const [assigningBatch, setAssigningBatch] = useState<string | null>(null)
-  const [selectedEvaluator, setSelectedEvaluator] = useState('')
-  const [selectedRole, setSelectedRole] = useState<'PRIMARY' | 'DOUBLE'>(
-    'PRIMARY'
-  )
+  const [selectedEvaluatorByBatch, setSelectedEvaluatorByBatch] = useState<
+    Record<string, string>
+  >({})
 
   // ---------------------------------------------------------------------------
   // Data fetching
@@ -136,6 +152,23 @@ export function BatchCreator({
   useEffect(() => {
     fetchUnbatchedStats()
   }, [fetchUnbatchedStats])
+
+  // Fetch import history so the create dialog can scope new batches to a
+  // specific upload (rolling-upload workflow per Amber's 4/9 meeting).
+  useEffect(() => {
+    async function fetchImports() {
+      try {
+        const res = await fetch(`/api/projects/${projectId}/imports`)
+        if (res.ok) {
+          const data = await res.json()
+          setImports(data)
+        }
+      } catch (err) {
+        console.error('Failed to fetch imports:', err)
+      }
+    }
+    fetchImports()
+  }, [projectId])
 
   // ---------------------------------------------------------------------------
   // Derived data
@@ -212,6 +245,7 @@ export function BatchCreator({
           name: batchName.trim() || undefined,
           activityId: selectedActivity || undefined,
           conjunctionId: selectedConjunction || undefined,
+          importId: selectedImport || undefined,
           batchSize:
             batchSize === 'all' ? 'all' : parseInt(batchSize) || 250,
           type: batchType,
@@ -223,6 +257,7 @@ export function BatchCreator({
         setBatchName('')
         setSelectedActivity('')
         setSelectedConjunction('')
+        setSelectedImport('')
         setBatchSize('250')
         setRandomize(true)
         setBatchType('REGULAR')
@@ -242,6 +277,17 @@ export function BatchCreator({
   }
 
   async function handleAssignEvaluator(batchId: string, userId: string) {
+    // Auto-derive scoringRole from existing assignee count:
+    //   0 existing -> PRIMARY (first scorer)
+    //   1 existing -> DOUBLE  (second scorer = double-scored batch)
+    // The dropdown-based role picker was confusing (per 2026-04-09 meeting);
+    // this keeps the mental model simple: add one person = independent,
+    // add a second = double-scored.
+    const batch = batches.find((b) => b.id === batchId)
+    const existingCount = batch?.evaluators.length ?? 0
+    const scoringRole: 'PRIMARY' | 'DOUBLE' =
+      existingCount === 0 ? 'PRIMARY' : 'DOUBLE'
+
     setAssigningBatch(batchId)
     try {
       const res = await fetch(
@@ -251,13 +297,17 @@ export function BatchCreator({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             userIds: [userId],
-            scoringRole: selectedRole,
+            scoringRole,
           }),
         }
       )
       if (res.ok) {
         onBatchesChange()
-        setSelectedEvaluator('')
+        setSelectedEvaluatorByBatch((prev) => {
+          const next = { ...prev }
+          delete next[batchId]
+          return next
+        })
       }
     } catch (err) {
       console.error('Failed to assign evaluator:', err)
@@ -299,6 +349,45 @@ export function BatchCreator({
       }
     } catch (err) {
       console.error('Failed to update batch status:', err)
+    }
+  }
+
+  async function handleAdjudicatorChange(
+    batchId: string,
+    adjudicatorId: string | null
+  ) {
+    try {
+      const res = await fetch(
+        `/api/projects/${projectId}/batches/${batchId}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ adjudicatorId }),
+        }
+      )
+      if (res.ok) {
+        onBatchesChange()
+      }
+    } catch (err) {
+      console.error('Failed to update adjudicator:', err)
+    }
+  }
+
+  async function handleVisibilityChange(batchId: string, isHidden: boolean) {
+    try {
+      const res = await fetch(
+        `/api/projects/${projectId}/batches/${batchId}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ isHidden }),
+        }
+      )
+      if (res.ok) {
+        onBatchesChange()
+      }
+    } catch (err) {
+      console.error('Failed to update visibility:', err)
     }
   }
 
@@ -346,20 +435,50 @@ export function BatchCreator({
                     type="button"
                     size="sm"
                     variant={
-                      batchType === 'CALIBRATION' ? 'default' : 'outline'
+                      batchType === 'TRAINING' ? 'default' : 'outline'
                     }
-                    onClick={() => setBatchType('CALIBRATION')}
+                    onClick={() => setBatchType('TRAINING')}
                   >
-                    Calibration
+                    Training
                   </Button>
                 </div>
-                {batchType === 'CALIBRATION' && (
+                {batchType === 'TRAINING' && (
                   <p className="text-xs text-muted-foreground">
-                    All evaluators will score all 8 criteria for calibration
-                    items.
+                    All evaluators will score every rubric criterion for these
+                    items. Use for initial onboarding before teams are assigned.
                   </p>
                 )}
               </div>
+
+              {/* Scope to a specific import (rolling upload workflow) */}
+              {imports.length > 0 && (
+                <div className="space-y-2">
+                  <Label htmlFor="import-filter">
+                    From upload{' '}
+                    <span className="text-muted-foreground">(optional)</span>
+                  </Label>
+                  <select
+                    id="import-filter"
+                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors"
+                    value={selectedImport}
+                    onChange={(e) => setSelectedImport(e.target.value)}
+                  >
+                    <option value="">All unbatched items</option>
+                    {imports
+                      .filter((imp) => imp.unbatchedRemaining > 0)
+                      .map((imp) => (
+                        <option key={imp.id} value={imp.id}>
+                          {imp.filename} · {imp.unbatchedRemaining} unbatched ·{' '}
+                          {new Date(imp.createdAt).toLocaleDateString()}
+                        </option>
+                      ))}
+                  </select>
+                  <p className="text-xs text-muted-foreground">
+                    Pick a single upload if you only want to batch items from
+                    that file.
+                  </p>
+                </div>
+              )}
 
               {/* Activity filter */}
               <div className="space-y-2">
@@ -539,7 +658,7 @@ export function BatchCreator({
           assign items to evaluators.
         </div>
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-2">
           {filteredBatches.map((batch) => {
             const pct =
               batch.itemCount > 0
@@ -547,107 +666,157 @@ export function BatchCreator({
                     (batch.scoredItemCount / batch.itemCount) * 100
                   )
                 : 0
-            const isCalibration = batch.type === 'CALIBRATION'
+            const isTraining = batch.type === 'TRAINING'
+            const evaluatorCount = batch.evaluators.length
+            const assignmentLabel = isTraining
+              ? 'Training'
+              : evaluatorCount >= 2
+                ? 'Double-Scored'
+                : evaluatorCount === 1
+                  ? 'Independent'
+                  : 'Unassigned'
+            const assignmentBadgeClass = isTraining
+              ? 'bg-status-active-bg text-status-active-text'
+              : evaluatorCount >= 2
+                ? 'bg-score-high-bg text-score-high-text'
+                : evaluatorCount === 1
+                  ? 'bg-muted text-muted-foreground'
+                  : 'bg-muted/50 text-muted-foreground/80'
+            const maxEvaluators = isTraining
+              ? evaluators.length
+              : 2
+            const canAddMore = evaluatorCount < maxEvaluators
+            const selectedEvaluator =
+              selectedEvaluatorByBatch[batch.id] ?? ''
 
             return (
-              <Card key={batch.id} className="transition-all duration-200 hover:shadow-sm hover:ring-1 hover:ring-primary/10">
-                <CardHeader className="pb-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <CardTitle className="text-base">
+              <Card
+                key={batch.id}
+                className="transition-all duration-200 hover:shadow-sm hover:ring-1 hover:ring-primary/10"
+              >
+                <CardContent className="space-y-2 py-3">
+                  {/* Line 1: name + badges + status + progress */}
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex min-w-0 flex-1 items-center gap-2">
+                      <span className="truncate text-sm font-semibold">
                         {batch.name}
-                      </CardTitle>
-                      <Badge className={batchStatusColors[batch.status] || ''}>
+                      </span>
+                      <Badge
+                        className={`${batchStatusColors[batch.status] || ''} shrink-0`}
+                      >
                         {batchStatusLabels[batch.status] || batch.status}
                       </Badge>
-                      {isCalibration && (
-                        <Badge className="bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
-                          Calibration
+                      <Badge
+                        className={`${assignmentBadgeClass} shrink-0`}
+                      >
+                        {assignmentLabel}
+                      </Badge>
+                      {batch.isHidden && (
+                        <Badge
+                          variant="outline"
+                          className="shrink-0 border-muted-foreground/30 bg-muted text-[10px] text-muted-foreground"
+                        >
+                          Hidden
                         </Badge>
                       )}
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex shrink-0 items-center gap-2">
+                      {batch.irrPct != null && (
+                        <Badge
+                          className={
+                            batch.irrPct >= 80
+                              ? 'bg-score-high-bg text-score-high-text'
+                              : batch.irrPct >= 60
+                                ? 'bg-status-active-bg text-status-active-text'
+                                : 'bg-destructive/10 text-destructive'
+                          }
+                          title="Inter-rater reliability: % of scored (item, criterion) pairs where both evaluators gave the same value."
+                        >
+                          IRR {batch.irrPct}%
+                        </Badge>
+                      )}
+                      <span className="text-xs tabular-nums text-muted-foreground">
+                        {batch.status === 'RECONCILING' &&
+                        batch.discrepancyCount != null
+                          ? `${batch.reconciledCount ?? 0}/${batch.discrepancyCount} reconciled`
+                          : `${batch.scoredItemCount}/${batch.itemCount} (${pct}%)`}
+                      </span>
                       <select
                         className="flex h-7 rounded-md border border-input bg-background px-2 py-0.5 text-xs shadow-sm transition-colors"
                         value={batch.status}
-                        onChange={(e) => handleBatchStatusChange(batch.id, e.target.value)}
+                        onChange={(e) =>
+                          handleBatchStatusChange(batch.id, e.target.value)
+                        }
                       >
                         <option value="DRAFT">Draft</option>
                         <option value="SCORING">Scoring</option>
                         <option value="RECONCILING">Reconciling</option>
                         <option value="COMPLETE">Complete</option>
                       </select>
-                      <Badge variant="outline">
-                        {batch.status === 'RECONCILING' && batch.discrepancyCount != null
-                          ? `${batch.reconciledCount ?? 0}/${batch.discrepancyCount} reconciled`
-                          : `${batch.scoredItemCount}/${batch.itemCount} scored (${pct}%)`}
-                      </Badge>
                     </div>
                   </div>
-                  <CardDescription>
-                    {batch.itemCount} items
-                    {batch.activityId &&
-                      ` \u00b7 Activity ${batch.activityId}`}
-                    {batch.conjunctionId &&
-                      ` \u00b7 ${batch.conjunctionId}`}
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  {/* Progress bar */}
-                  <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
-                    <div
-                      className="h-full rounded-full bg-primary transition-all duration-300"
-                      style={{ width: `${pct}%` }}
-                    />
+
+                  {/* Line 2: metadata + progress bar */}
+                  <div className="flex items-center gap-3">
+                    <span className="shrink-0 text-xs text-muted-foreground">
+                      {batch.itemCount} items
+                      {batch.activityId && ` · Activity ${batch.activityId}`}
+                      {batch.conjunctionId && ` · ${batch.conjunctionId}`}
+                    </span>
+                    <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+                      <div
+                        className="h-full rounded-full bg-primary transition-all duration-300"
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
                   </div>
 
-                  {/* Assigned evaluators */}
-                  <div className="space-y-2">
-                    <p className="text-xs font-medium text-muted-foreground">
-                      Assigned Evaluators
-                    </p>
+                  {/* Line 3: evaluators + add-evaluator control */}
+                  <div className="flex flex-wrap items-center gap-2">
                     {batch.evaluators.length === 0 ? (
-                      <p className="text-xs text-muted-foreground/60">
-                        No evaluators assigned
-                      </p>
+                      <span className="text-xs text-muted-foreground/60">
+                        No evaluators
+                      </span>
                     ) : (
-                      <div className="flex flex-wrap gap-2">
-                        {batch.evaluators.map((ev) => (
-                          <Badge
-                            key={ev.id}
-                            variant="secondary"
-                            className="gap-1"
+                      batch.evaluators.map((ev) => (
+                        <Badge
+                          key={ev.id}
+                          variant="secondary"
+                          className="gap-1"
+                        >
+                          {ev.name || ev.email}
+                          <button
+                            onClick={() =>
+                              handleRemoveEvaluator(batch.id, ev.id)
+                            }
+                            className="ml-1 text-muted-foreground hover:text-destructive"
+                            aria-label={`Remove ${ev.name || ev.email}`}
                           >
-                            {ev.name || ev.email}
-                            {ev.scoringRole === 'DOUBLE' && (
-                              <span className="ml-1 text-xs text-muted-foreground">
-                                (Double)
-                              </span>
-                            )}
-                            <button
-                              onClick={() =>
-                                handleRemoveEvaluator(batch.id, ev.id)
-                              }
-                              className="ml-1 text-muted-foreground hover:text-destructive"
-                            >
-                              &times;
-                            </button>
-                          </Badge>
-                        ))}
-                      </div>
+                            &times;
+                          </button>
+                        </Badge>
+                      ))
                     )}
 
-                    {/* Add evaluator to batch */}
-                    {evaluators.length > 0 && (
-                      <div className="flex items-center gap-2">
+                    {canAddMore && evaluators.length > 0 && (
+                      <div className="ml-auto flex items-center gap-1">
                         <select
-                          className="flex h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors"
+                          className="flex h-7 rounded-md border border-input bg-background px-2 py-0.5 text-xs shadow-sm transition-colors"
                           value={selectedEvaluator}
                           onChange={(e) =>
-                            setSelectedEvaluator(e.target.value)
+                            setSelectedEvaluatorByBatch((prev) => ({
+                              ...prev,
+                              [batch.id]: e.target.value,
+                            }))
                           }
                         >
-                          <option value="">Add evaluator...</option>
+                          <option value="">
+                            {evaluatorCount === 0
+                              ? 'Assign evaluator…'
+                              : isTraining
+                                ? 'Add another…'
+                                : 'Add for double-scoring…'}
+                          </option>
                           {evaluators
                             .filter(
                               (ev) =>
@@ -661,21 +830,10 @@ export function BatchCreator({
                               </option>
                             ))}
                         </select>
-                        <select
-                          className="flex h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors"
-                          value={selectedRole}
-                          onChange={(e) =>
-                            setSelectedRole(
-                              e.target.value as 'PRIMARY' | 'DOUBLE'
-                            )
-                          }
-                        >
-                          <option value="PRIMARY">Independent</option>
-                          <option value="DOUBLE">Double</option>
-                        </select>
                         <Button
                           size="sm"
                           variant="outline"
+                          className="h-7 px-2 text-xs"
                           disabled={
                             !selectedEvaluator ||
                             assigningBatch === batch.id
@@ -692,11 +850,57 @@ export function BatchCreator({
                           {assigningBatch === batch.id ? (
                             <Loader2 className="h-3 w-3 animate-spin" />
                           ) : (
-                            <Plus className="h-3 w-3" />
+                            'Add'
                           )}
                         </Button>
                       </div>
                     )}
+                  </div>
+
+                  {/* Line 4: adjudicator (Double-Scored only) + visibility */}
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+                    {evaluatorCount >= 2 && !isTraining && (
+                      <div className="flex items-center gap-2">
+                        <span className="text-muted-foreground">
+                          Adjudicator:
+                        </span>
+                        <select
+                          className="flex h-7 rounded-md border border-input bg-background px-2 py-0.5 text-xs shadow-sm transition-colors"
+                          value={batch.adjudicatorId ?? ''}
+                          onChange={(e) =>
+                            handleAdjudicatorChange(
+                              batch.id,
+                              e.target.value || null
+                            )
+                          }
+                        >
+                          <option value="">— None —</option>
+                          {evaluators.map((ev) => (
+                            <option key={ev.user.id} value={ev.user.id}>
+                              {ev.user.name || ev.user.email}
+                            </option>
+                          ))}
+                        </select>
+                        {!batch.adjudicatorId && (
+                          <span className="text-muted-foreground/60">
+                            (needed before the pair can escalate)
+                          </span>
+                        )}
+                      </div>
+                    )}
+                    <label className="flex cursor-pointer items-center gap-1.5">
+                      <input
+                        type="checkbox"
+                        checked={!!batch.isHidden}
+                        onChange={(e) =>
+                          handleVisibilityChange(batch.id, e.target.checked)
+                        }
+                        className="size-3.5 rounded border-input"
+                      />
+                      <span className="text-muted-foreground">
+                        Hidden from annotators
+                      </span>
+                    </label>
                   </div>
                 </CardContent>
               </Card>

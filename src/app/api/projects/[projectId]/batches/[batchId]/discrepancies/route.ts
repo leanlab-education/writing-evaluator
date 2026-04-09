@@ -27,7 +27,7 @@ export async function GET(
 
   const batch = await prisma.batch.findUnique({
     where: { id: batchId },
-    select: { status: true, projectId: true },
+    select: { status: true, projectId: true, adjudicatorId: true },
   })
 
   if (!batch || batch.projectId !== projectId) {
@@ -41,7 +41,12 @@ export async function GET(
     )
   }
 
-  // Fetch all original scores for this batch
+  const hasAdjudicator = batch.adjudicatorId != null
+
+  // Fetch all original scores for this batch. Notes are stored per-Score
+  // row but the scoring UI writes the same notes value to every dimension
+  // row for an (item, user) pair, so we can read notes from any one of a
+  // coder's Score rows for a given item.
   const scores = await prisma.score.findMany({
     where: {
       feedbackItem: { batchId },
@@ -72,6 +77,44 @@ export async function GET(
       },
     },
   })
+
+  // Build a lookup: (feedbackItemId, userId) -> notes (first non-null found).
+  // Used to attach each coder's per-item notes to the discrepancy response
+  // so the reconcile UI can show "why I scored this" for both coders.
+  const notesByItemUser = new Map<string, string>()
+  for (const score of scores) {
+    const key = `${score.feedbackItemId}::${score.userId}`
+    if (score.notes && score.notes.trim() && !notesByItemUser.has(key)) {
+      notesByItemUser.set(key, score.notes)
+    }
+  }
+
+  // Open escalations for this batch, keyed by (feedbackItemId, dimensionId)
+  const openEscalations = await prisma.escalation.findMany({
+    where: { batchId, resolvedAt: null },
+    select: {
+      id: true,
+      feedbackItemId: true,
+      dimensionId: true,
+      createdAt: true,
+      escalatedBy: { select: { id: true, name: true, email: true } },
+    },
+  })
+  const escalationByKey = new Map<
+    string,
+    {
+      id: string
+      escalatedBy: { id: string; name: string | null; email: string }
+      createdAt: Date
+    }
+  >()
+  for (const esc of openEscalations) {
+    escalationByKey.set(`${esc.feedbackItemId}::${esc.dimensionId}`, {
+      id: esc.id,
+      escalatedBy: esc.escalatedBy,
+      createdAt: esc.createdAt,
+    })
+  }
 
   // Group by (feedbackItemId, dimensionId) to find discrepancies
   const groupMap = new Map<
@@ -108,6 +151,13 @@ export async function GET(
   }
 
   // Build per-item response with discrepancies and agreements
+  type ItemCoder = {
+    userId: string
+    name: string | null
+    email: string
+    notes: string | null
+  }
+
   const itemMap = new Map<
     string,
     {
@@ -117,6 +167,7 @@ export async function GET(
       activityId: string | null
       conjunctionId: string | null
       displayOrder: number | null
+      coders: ItemCoder[] // both coders who scored this item (for notes display)
       discrepancies: {
         dimensionId: string
         dimensionLabel: string
@@ -127,6 +178,11 @@ export async function GET(
         scoreLabelJson: string | null
         evaluatorA: { userId: string; name: string | null; email: string; value: number; scoreId: string }
         evaluatorB: { userId: string; name: string | null; email: string; value: number; scoreId: string }
+        escalation: {
+          id: string
+          escalatedByName: string | null
+          escalatedByEmail: string
+        } | null
       }[]
       agreements: {
         dimensionId: string
@@ -146,16 +202,32 @@ export async function GET(
         activityId: group.feedbackItem.activityId,
         conjunctionId: group.feedbackItem.conjunctionId,
         displayOrder: group.feedbackItem.displayOrder,
+        coders: [],
         discrepancies: [],
         agreements: [],
       })
     }
 
     const item = itemMap.get(fid)!
+
+    // Record each coder once per item with their notes
+    for (const ev of group.evaluators) {
+      if (!item.coders.some((c) => c.userId === ev.userId)) {
+        item.coders.push({
+          userId: ev.userId,
+          name: ev.name,
+          email: ev.email,
+          notes: notesByItemUser.get(`${fid}::${ev.userId}`) ?? null,
+        })
+      }
+    }
+
     const evals = group.evaluators
 
     if (evals.length === 2) {
       if (evals[0].value !== evals[1].value) {
+        const escKey = `${fid}::${group.dimension.id}`
+        const esc = escalationByKey.get(escKey)
         item.discrepancies.push({
           dimensionId: group.dimension.id,
           dimensionLabel: group.dimension.label,
@@ -166,6 +238,13 @@ export async function GET(
           scoreLabelJson: group.dimension.scoreLabelJson,
           evaluatorA: evals[0],
           evaluatorB: evals[1],
+          escalation: esc
+            ? {
+                id: esc.id,
+                escalatedByName: esc.escalatedBy.name,
+                escalatedByEmail: esc.escalatedBy.email,
+              }
+            : null,
         })
       } else {
         item.agreements.push({
@@ -207,6 +286,7 @@ export async function GET(
 
   return NextResponse.json({
     items: discrepantItems,
+    hasAdjudicator,
     summary: {
       totalItems: itemMap.size,
       discrepantItems: discrepantItems.length,

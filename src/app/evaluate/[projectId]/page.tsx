@@ -16,24 +16,30 @@ export default async function EvaluatePage({
   const { projectId } = await params
   const { batchId } = await searchParams
 
-  // Non-admins: verify they have a scorable batch in this project
+  // Non-admins: verify they have a scorable batch in this project and
+  // that the batch hasn't been hidden by an admin.
   if (session.user.role !== 'ADMIN') {
     if (batchId) {
-      // Check the specific batch is open for scoring
+      // Check the specific batch is open for scoring AND not hidden
       const batch = await prisma.batch.findUnique({
         where: { id: batchId },
-        select: { status: true, projectId: true },
+        select: { status: true, projectId: true, isHidden: true },
       })
-      if (!batch || batch.projectId !== projectId || (batch.status !== 'SCORING' && batch.status !== 'RECONCILING')) {
+      if (
+        !batch ||
+        batch.projectId !== projectId ||
+        batch.isHidden ||
+        (batch.status !== 'SCORING' && batch.status !== 'RECONCILING')
+      ) {
         redirect('/')
       }
     } else {
-      // Check user has at least one scorable batch in this project
       const scorableBatch = await prisma.batchAssignment.findFirst({
         where: {
           userId: session.user.id,
           batch: {
             projectId,
+            isHidden: false,
             status: { in: ['SCORING', 'RECONCILING'] },
           },
         },

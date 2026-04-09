@@ -194,9 +194,9 @@ export function EvaluateClient({
       projectData.rubric.sort((a, b) => a.sortOrder - b.sortOrder)
 
       // Filter rubric to only the evaluator's team dimensions
-      // UNLESS this is a calibration batch (show all criteria)
-      const isCalibration = batchType === 'CALIBRATION'
-      if (team && !isCalibration) {
+      // UNLESS this is a training batch (show all criteria)
+      const isTraining = batchType === 'TRAINING'
+      if (team && !isTraining) {
         const teamDimIds = new Set(team.dimensionIds)
         projectData.rubric = projectData.rubric.filter((d) =>
           teamDimIds.has(d.id)

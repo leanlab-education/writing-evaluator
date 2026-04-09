@@ -32,7 +32,9 @@ export function ImportClient({ projectId }: { projectId: string }) {
   const [fileName, setFileName] = useState('')
   const [importing, setImporting] = useState(false)
   const [importResult, setImportResult] = useState<{
+    importId: string
     imported: number
+    skipped: number
     total: number
   } | null>(null)
   const [importError, setImportError] = useState('')
@@ -103,6 +105,7 @@ export function ImportClient({ projectId }: { projectId: string }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           projectId,
+          filename: fileName,
           items: rows.map((row) => ({
             responseId: row.Response_ID || null,
             cycleId: row.Cycle_ID || null,
@@ -164,8 +167,21 @@ export function ImportClient({ projectId }: { projectId: string }) {
               <CheckCircle className="mx-auto h-12 w-12 text-success" />
               <h3 className="mt-4 text-lg font-medium">Import Complete</h3>
               <p className="mt-1 text-sm text-muted-foreground">
-                Successfully imported {importResult.imported} of{' '}
-                {importResult.total} items.
+                <span className="font-medium text-foreground">
+                  {importResult.imported}
+                </span>{' '}
+                new items imported
+                {importResult.skipped > 0 && (
+                  <>
+                    ,{' '}
+                    <span className="font-medium text-foreground">
+                      {importResult.skipped}
+                    </span>{' '}
+                    skipped as duplicates (Feedback_ID already existed in this
+                    project)
+                  </>
+                )}
+                .
               </p>
               <div className="mt-4 flex justify-center gap-3">
                 <Button

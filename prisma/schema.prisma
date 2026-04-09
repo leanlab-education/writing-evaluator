@@ -20,10 +20,13 @@ model User {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  projects         ProjectEvaluator[]
-  scores           Score[]
-  batchAssignments BatchAssignment[]
-  teamMemberships  EvaluatorTeamMember[]
+  projects              ProjectEvaluator[]
+  scores                Score[]
+  batchAssignments      BatchAssignment[]
+  teamMemberships       EvaluatorTeamMember[]
+  adjudicatedBatches    Batch[]        @relation("BatchAdjudicator")
+  escalationsCreated    Escalation[]   @relation("EscalationEscalatedBy")
+  escalationsResolved   Escalation[]   @relation("EscalationResolvedBy")
 }
 
 enum Role {
@@ -66,6 +69,7 @@ model Project {
   assignments   Assignment[]
   batches       Batch[]
   teams         EvaluatorTeam[]
+  imports       Import[]
 }
 
 enum ProjectStatus {
@@ -93,6 +97,7 @@ model RubricDimension {
   project        Project                  @relation(fields: [projectId], references: [id], onDelete: Cascade)
   scores         Score[]
   teamDimensions EvaluatorTeamDimension[]
+  escalations    Escalation[]
 
   @@unique([projectId, key])
 }
@@ -117,13 +122,16 @@ model FeedbackItem {
   optimal        String?
   feedbackType   String?
   batchId        String?        // FK to Batch (null = unassigned to batch)
+  importId       String?        // FK to Import (which upload brought this item in)
   displayOrder   Int?
   createdAt      DateTime       @default(now())
 
   project     Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
   batch       Batch?       @relation(fields: [batchId], references: [id], onDelete: SetNull)
+  import      Import?      @relation(fields: [importId], references: [id], onDelete: SetNull)
   assignments Assignment[]
   scores      Score[]
+  escalations Escalation[]
 
   @@unique([projectId, feedbackId])
 }
@@ -176,21 +184,25 @@ enum AssignmentStatus {
 // ============================================
 
 model Batch {
-  id            String      @id @default(cuid())
-  projectId     String
-  name          String                       // e.g. "Activity 1 / Because / Batch 3"
-  activityId    String?                      // Quill activity this batch covers
-  conjunctionId String?                      // "But" or "Because"
-  type          BatchType   @default(REGULAR)
-  status        BatchStatus @default(DRAFT)
-  size          Int         @default(250)    // Target batch size
-  isAssigned    Boolean     @default(false)  // Locked after first evaluator assignment
-  sortOrder     Int         @default(0)
-  createdAt     DateTime    @default(now())
+  id             String      @id @default(cuid())
+  projectId      String
+  name           String                       // e.g. "Activity 1 / Because / Batch 3"
+  activityId     String?                      // Quill activity this batch covers
+  conjunctionId  String?                      // "But" or "Because"
+  type           BatchType   @default(REGULAR)
+  status         BatchStatus @default(DRAFT)
+  size           Int         @default(250)    // Target batch size
+  isAssigned     Boolean     @default(false)  // Locked after first evaluator assignment
+  sortOrder      Int         @default(0)
+  adjudicatorId  String?                      // Third-person tiebreaker for escalated discrepancies
+  isHidden       Boolean     @default(false)  // Hide from annotators (e.g. release Independent batches only after Double-Scored IRR passes)
+  createdAt      DateTime    @default(now())
 
   project       Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  adjudicator   User?             @relation("BatchAdjudicator", fields: [adjudicatorId], references: [id], onDelete: SetNull)
   feedbackItems FeedbackItem[]
   assignments   BatchAssignment[]
+  escalations   Escalation[]
 }
 
 enum BatchStatus {
@@ -201,8 +213,8 @@ enum BatchStatus {
 }
 
 enum BatchType {
-  REGULAR     // Normal scoring — evaluator sees only their team's criteria
-  CALIBRATION // All evaluators score all 8 criteria (for IRR baseline)
+  REGULAR   // Normal scoring — evaluator sees only their team's criteria
+  TRAINING  // All evaluators score every rubric criterion — initial onboarding before teams are assigned
 }
 
 model BatchAssignment {
@@ -285,4 +297,56 @@ model Score {
   dimension    RubricDimension @relation(fields: [dimensionId], references: [id], onDelete: Cascade)
 
   @@unique([feedbackItemId, userId, dimensionId, isReconciled])
+}
+
+// ============================================
+// Imports (rolling CSV upload provenance)
+// ============================================
+
+// Each CSV upload creates an Import row so admins can see a history and
+// scope batch creation to a single upload ("batch only the items from
+// today's whales/because upload"). Duplicates are skipped on import via
+// the @@unique([projectId, feedbackId]) constraint on FeedbackItem.
+model Import {
+  id           String   @id @default(cuid())
+  projectId    String
+  filename     String
+  itemCount    Int      // Rows successfully imported by this upload
+  skippedCount Int      // Rows skipped because the Feedback_ID already existed
+  createdAt    DateTime @default(now())
+
+  project       Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  feedbackItems FeedbackItem[]
+}
+
+// ============================================
+// Escalations (third-person tiebreaker for discrepancies)
+// ============================================
+
+// When a pair reconciling a Double-Scored batch cannot agree on a specific
+// criterion of an item, they escalate that criterion to the batch's
+// adjudicator. Per Amber's 2026-04-09 note: "each criterion is standalone"
+// so escalation is per-(item, dimension), not per-item.
+//
+// The adjudicator resolves each escalated criterion by writing an
+// isReconciled Score row (same audit trail pattern as pair-resolved items).
+// The rationale is captured in the pair's "Why we decided what we did"
+// reconciliation notes, not a separate escalation-reason field.
+model Escalation {
+  id             String    @id @default(cuid())
+  batchId        String
+  feedbackItemId String
+  dimensionId    String    // Per-criterion scope — Amber 2026-04-09
+  escalatedById  String    // userId of the pair member who clicked Escalate
+  resolvedById   String?   // adjudicator userId
+  resolvedAt     DateTime?
+  createdAt      DateTime  @default(now())
+
+  batch        Batch           @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  feedbackItem FeedbackItem    @relation(fields: [feedbackItemId], references: [id], onDelete: Cascade)
+  dimension    RubricDimension @relation(fields: [dimensionId], references: [id], onDelete: Cascade)
+  escalatedBy  User            @relation("EscalationEscalatedBy", fields: [escalatedById], references: [id], onDelete: Cascade)
+  resolvedBy   User?           @relation("EscalationResolvedBy", fields: [resolvedById], references: [id], onDelete: SetNull)
+
+  @@unique([batchId, feedbackItemId, dimensionId])
 }

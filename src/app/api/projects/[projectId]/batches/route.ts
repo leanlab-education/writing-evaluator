@@ -1,5 +1,6 @@
 import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/db'
+import { computeBatchIRR } from '@/lib/irr'
 import { NextRequest, NextResponse } from 'next/server'
 
 // GET /api/projects/[projectId]/batches — list batches with stats
@@ -65,6 +66,21 @@ export async function GET(
           .size
       }
 
+      // IRR: only meaningful for exactly-2-evaluator batches with scores.
+      // Amber wants to see this displayed (Q2 answer: option B — display
+      // but release manually).
+      let irrPct: number | null = null
+      if (
+        batch.assignments.length === 2 &&
+        batch.type !== 'TRAINING' &&
+        (batch.status === 'SCORING' ||
+          batch.status === 'RECONCILING' ||
+          batch.status === 'COMPLETE')
+      ) {
+        const irr = await computeBatchIRR(batch.id)
+        irrPct = irr?.agreementPct ?? null
+      }
+
       // For RECONCILING batches, compute discrepancy stats
       let discrepancyCount: number | undefined
       let reconciledCount: number | undefined
@@ -97,11 +113,14 @@ export async function GET(
         type: batch.type,
         size: batch.size,
         sortOrder: batch.sortOrder,
+        adjudicatorId: batch.adjudicatorId,
+        isHidden: batch.isHidden,
         createdAt: batch.createdAt,
         itemCount: batch._count.feedbackItems,
         scoredItemCount,
         discrepancyCount,
         reconciledCount,
+        irrPct,
         evaluators: batch.assignments.map((a) => ({
           ...a.user,
           scoringRole: a.scoringRole,
@@ -119,9 +138,9 @@ export async function GET(
 //   activityId?: string,        — filter items by activity
 //   conjunctionId?: string,     — filter items by conjunction
 //   batchSize?: number,         — how many items (default 250, or "all" for all matching)
-//   type?: "REGULAR" | "CALIBRATION",
+//   type?: "REGULAR" | "TRAINING",
 //   randomize?: boolean,        — shuffle AI/HUMAN order (default true)
-//   itemIds?: string[],         — explicit item selection (for calibration batches)
+//   itemIds?: string[],         — explicit item selection (for training batches)
 //   mode?: "auto",              — legacy: auto-group by activity+conjunction
 // }
 export async function POST(
@@ -151,20 +170,21 @@ export async function POST(
     type = 'REGULAR',
     randomize = true,
     itemIds,
+    importId,
   } = body
 
   let name = body.name as string | undefined
 
-  // For calibration batches with explicit item IDs
-  if (type === 'CALIBRATION' && Array.isArray(itemIds) && itemIds.length > 0) {
+  // For training batches with explicit item IDs
+  if (type === 'TRAINING' && Array.isArray(itemIds) && itemIds.length > 0) {
     const sortOrder = await prisma.batch.count({ where: { projectId } })
-    const batchName = name || `Calibration Batch`
+    const batchName = name || `Training Batch`
 
     const batch = await prisma.batch.create({
       data: {
         projectId,
         name: batchName,
-        type: 'CALIBRATION',
+        type: 'TRAINING',
         size: itemIds.length,
         sortOrder,
       },
@@ -192,6 +212,7 @@ export async function POST(
   }
   if (activityId) whereClause.activityId = activityId
   if (conjunctionId) whereClause.conjunctionId = conjunctionId
+  if (importId) whereClause.importId = importId
 
   // Count available items
   const availableCount = await prisma.feedbackItem.count({
@@ -234,7 +255,7 @@ export async function POST(
       name,
       activityId: activityId || null,
       conjunctionId: conjunctionId || null,
-      type: type === 'CALIBRATION' ? 'CALIBRATION' : 'REGULAR',
+      type: type === 'TRAINING' ? 'TRAINING' : 'REGULAR',
       size: takeCount,
       sortOrder,
     },

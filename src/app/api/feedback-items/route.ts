@@ -82,7 +82,11 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json()
-  const { projectId, items } = body
+  const { projectId, items, filename } = body as {
+    projectId?: string
+    items?: unknown[]
+    filename?: string
+  }
 
   if (!projectId || !Array.isArray(items) || items.length === 0) {
     return NextResponse.json(
@@ -99,25 +103,56 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Project not found' }, { status: 404 })
   }
 
-  const data = items.map(
-    (
-      item: {
-        responseId?: string
-        cycleId?: string
-        studentId: string
-        activityId?: string
-        conjunctionId?: string
-        studentText: string
-        feedbackId: string
-        teacherId?: string
-        feedbackText: string
-        feedbackSource: string
-        optimal?: string
-        feedbackType?: string
-      },
-      index: number
-    ) => ({
+  // Identify which Feedback_IDs already exist in this project so we can
+  // report a proper skip count AND attach an importId to only the NEW rows.
+  // createMany({skipDuplicates: true}) doesn't return ids, so we do the
+  // dedupe manually: pre-check existing, insert only new ones, tag with
+  // the Import id.
+  const incomingIds = (items as { feedbackId: string }[]).map(
+    (i) => i.feedbackId
+  )
+  const existing = await prisma.feedbackItem.findMany({
+    where: { projectId, feedbackId: { in: incomingIds } },
+    select: { feedbackId: true },
+  })
+  const existingIds = new Set(existing.map((e) => e.feedbackId))
+  const newItems = (items as {
+    responseId?: string
+    cycleId?: string
+    studentId: string
+    activityId?: string
+    conjunctionId?: string
+    studentText: string
+    feedbackId: string
+    teacherId?: string
+    feedbackText: string
+    feedbackSource: string
+    optimal?: string
+    feedbackType?: string
+  }[]).filter((i) => !existingIds.has(i.feedbackId))
+
+  // Get the current max displayOrder so this import's items don't collide
+  // with pre-existing ones (rolling upload semantics).
+  const maxOrder = await prisma.feedbackItem.aggregate({
+    where: { projectId },
+    _max: { displayOrder: true },
+  })
+  const startOrder = (maxOrder._max.displayOrder ?? -1) + 1
+
+  // Create an Import row up front so we can tag the new items with its id.
+  const importRow = await prisma.import.create({
+    data: {
       projectId,
+      filename: filename?.toString().slice(0, 255) || 'unnamed.csv',
+      itemCount: newItems.length,
+      skippedCount: items.length - newItems.length,
+    },
+  })
+
+  if (newItems.length > 0) {
+    const data = newItems.map((item, index) => ({
+      projectId,
+      importId: importRow.id,
       responseId: item.responseId || null,
       cycleId: item.cycleId || null,
       studentId: item.studentId,
@@ -130,17 +165,19 @@ export async function POST(request: Request) {
       feedbackSource: item.feedbackSource.toUpperCase() as FeedbackSource,
       optimal: item.optimal || null,
       feedbackType: item.feedbackType || null,
-      displayOrder: index,
-    })
-  )
+      displayOrder: startOrder + index,
+    }))
 
-  const result = await prisma.feedbackItem.createMany({
-    data,
-    skipDuplicates: true,
-  })
+    await prisma.feedbackItem.createMany({ data, skipDuplicates: true })
+  }
 
   return NextResponse.json(
-    { imported: result.count, total: items.length },
+    {
+      importId: importRow.id,
+      imported: newItems.length,
+      skipped: items.length - newItems.length,
+      total: items.length,
+    },
     { status: 201 }
   )
 }

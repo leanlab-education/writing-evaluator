@@ -21,6 +21,8 @@ import {
   AlertTriangle,
   ArrowLeft,
   Scale,
+  Flag,
+  Undo2,
 } from 'lucide-react'
 import { AppShell } from '@/components/app-shell'
 import {
@@ -51,12 +53,24 @@ interface Discrepancy {
   scoreLabelJson: string | null
   evaluatorA: EvaluatorScore
   evaluatorB: EvaluatorScore
+  escalation: {
+    id: string
+    escalatedByName: string | null
+    escalatedByEmail: string
+  } | null
 }
 
 interface Agreement {
   dimensionId: string
   dimensionLabel: string
   value: number
+}
+
+interface ItemCoder {
+  userId: string
+  name: string | null
+  email: string
+  notes: string | null
 }
 
 interface DiscrepantItem {
@@ -66,12 +80,14 @@ interface DiscrepantItem {
   activityId: string | null
   conjunctionId: string | null
   displayOrder: number | null
+  coders: ItemCoder[]
   discrepancies: Discrepancy[]
   agreements: Agreement[]
 }
 
 interface DiscrepancyResponse {
   items: DiscrepantItem[]
+  hasAdjudicator: boolean
   summary: {
     totalItems: number
     discrepantItems: number
@@ -119,10 +135,12 @@ export function ReconcileClient({
   const [loading, setLoading] = useState(true)
   const [items, setItems] = useState<DiscrepantItem[]>([])
   const [summary, setSummary] = useState<DiscrepancyResponse['summary'] | null>(null)
+  const [hasAdjudicator, setHasAdjudicator] = useState(false)
   const [currentIndex, setCurrentIndex] = useState(0)
   const [itemStates, setItemStates] = useState<Record<string, ItemReconcileState>>({})
   const [saving, setSaving] = useState(false)
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const [escalatingDimId, setEscalatingDimId] = useState<string | null>(null)
 
   // Fetch discrepancies on mount
   useEffect(() => {
@@ -135,6 +153,7 @@ export function ReconcileClient({
         const data: DiscrepancyResponse = await res.json()
         setItems(data.items)
         setSummary(data.summary)
+        setHasAdjudicator(data.hasAdjudicator)
 
         // Initialize state for each item - pre-fill agreed dimensions
         const states: Record<string, ItemReconcileState> = {}
@@ -163,10 +182,13 @@ export function ReconcileClient({
   const currentItem = items[currentIndex] ?? null
   const currentState = currentItem ? itemStates[currentItem.feedbackItemId] : null
 
-  // Check if all discrepant dimensions have a final value
+  // A dimension is "done" if it has a final value OR has been escalated.
+  // Escalated dimensions will be resolved by the adjudicator; the pair
+  // can still save their progress on the rest of the item.
   const allDiscrepanciesScored = currentItem
     ? currentItem.discrepancies.every(
-        (d) => currentState?.scores[d.dimensionId] != null
+        (d) =>
+          d.escalation != null || currentState?.scores[d.dimensionId] != null
       )
     : false
 
@@ -204,6 +226,110 @@ export function ReconcileClient({
     [currentItem]
   )
 
+  // Escalate a single criterion to the adjudicator. Per Amber's 2026-04-09
+  // answer: escalation is per-criterion, and the reason/rationale lives in
+  // the existing reconciliation notes box (no separate reason prompt).
+  const handleEscalate = useCallback(
+    async (dimensionId: string) => {
+      if (!currentItem) return
+      setEscalatingDimId(dimensionId)
+      try {
+        const res = await fetch(
+          `/api/projects/${projectId}/batches/${batchId}/escalate`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              feedbackItemId: currentItem.feedbackItemId,
+              dimensionId,
+            }),
+          }
+        )
+        if (!res.ok) {
+          const err = await res.json()
+          alert(err.error || 'Failed to escalate')
+          return
+        }
+        const created: {
+          id: string
+        } = await res.json()
+
+        // Reflect escalation in local state without a full refetch
+        setItems((prev) =>
+          prev.map((it) =>
+            it.feedbackItemId === currentItem.feedbackItemId
+              ? {
+                  ...it,
+                  discrepancies: it.discrepancies.map((d) =>
+                    d.dimensionId === dimensionId
+                      ? {
+                          ...d,
+                          escalation: {
+                            id: created.id,
+                            escalatedByName: userName,
+                            escalatedByEmail: '',
+                          },
+                        }
+                      : d
+                  ),
+                }
+              : it
+          )
+        )
+        // Clear any selected final value for this dimension since the
+        // adjudicator will decide instead.
+        setItemStates((prev) => ({
+          ...prev,
+          [currentItem.feedbackItemId]: {
+            ...prev[currentItem.feedbackItemId],
+            scores: {
+              ...prev[currentItem.feedbackItemId].scores,
+              [dimensionId]: null,
+            },
+          },
+        }))
+      } finally {
+        setEscalatingDimId(null)
+      }
+    },
+    [currentItem, projectId, batchId, userName]
+  )
+
+  const handleWithdrawEscalation = useCallback(
+    async (dimensionId: string) => {
+      if (!currentItem) return
+      setEscalatingDimId(dimensionId)
+      try {
+        const res = await fetch(
+          `/api/projects/${projectId}/batches/${batchId}/escalate?feedbackItemId=${currentItem.feedbackItemId}&dimensionId=${dimensionId}`,
+          { method: 'DELETE' }
+        )
+        if (!res.ok) {
+          const err = await res.json()
+          alert(err.error || 'Failed to withdraw escalation')
+          return
+        }
+        setItems((prev) =>
+          prev.map((it) =>
+            it.feedbackItemId === currentItem.feedbackItemId
+              ? {
+                  ...it,
+                  discrepancies: it.discrepancies.map((d) =>
+                    d.dimensionId === dimensionId
+                      ? { ...d, escalation: null }
+                      : d
+                  ),
+                }
+              : it
+          )
+        )
+      } finally {
+        setEscalatingDimId(null)
+      }
+    },
+    [currentItem, projectId, batchId]
+  )
+
   const handleSaveAndContinue = useCallback(async () => {
     if (!currentItem || !currentState || !allDiscrepanciesScored) return
 
@@ -211,9 +337,16 @@ export function ReconcileClient({
     setSaveStatus('saving')
 
     try {
-      // Build scores array: all dimensions (agreed + discrepant)
+      // Build scores array: all dimensions (agreed + resolved discrepancies).
+      // Escalated dimensions are intentionally excluded — the adjudicator
+      // will write their own reconciled Score row for those.
+      const escalatedDimIds = new Set(
+        currentItem.discrepancies
+          .filter((d) => d.escalation != null)
+          .map((d) => d.dimensionId)
+      )
       const scores = Object.entries(currentState.scores)
-        .filter(([, v]) => v != null)
+        .filter(([dimensionId, v]) => v != null && !escalatedDimIds.has(dimensionId))
         .map(([dimensionId, value]) => ({ dimensionId, value: value! }))
 
       const res = await fetch(
@@ -453,6 +586,8 @@ export function ReconcileClient({
               {currentItem?.discrepancies.map((disc) => {
                 const scoreLabels = parseScoreLabels(disc.scoreLabelJson)
                 const finalValue = currentState?.scores[disc.dimensionId] ?? null
+                const isEscalated = disc.escalation != null
+                const isEscalatingThis = escalatingDimId === disc.dimensionId
 
                 const scaleOptions: number[] = []
                 for (let v = disc.scaleMin; v <= disc.scaleMax; v++) {
@@ -462,13 +597,29 @@ export function ReconcileClient({
                 return (
                   <div key={disc.dimensionId} className="flex flex-col gap-3">
                     <div className="flex items-center gap-2">
-                      <AlertTriangle className="size-3.5 text-warning" />
+                      {isEscalated ? (
+                        <Flag className="size-3.5 text-primary" />
+                      ) : (
+                        <AlertTriangle className="size-3.5 text-warning" />
+                      )}
                       <Label className="text-sm font-semibold text-foreground">
                         {disc.dimensionLabel}
                       </Label>
-                      <Badge variant="outline" className="text-[10px] bg-warning/10 text-warning border-warning/30">
-                        Discrepancy
-                      </Badge>
+                      {isEscalated ? (
+                        <Badge
+                          variant="outline"
+                          className="border-primary/30 bg-primary/10 text-[10px] text-primary"
+                        >
+                          Escalated to adjudicator
+                        </Badge>
+                      ) : (
+                        <Badge
+                          variant="outline"
+                          className="border-warning/30 bg-warning/10 text-[10px] text-warning"
+                        >
+                          Discrepancy
+                        </Badge>
+                      )}
                     </div>
 
                     {/* Both evaluators' scores side by side */}
@@ -518,42 +669,89 @@ export function ReconcileClient({
                       </div>
                     </div>
 
-                    {/* Final score selection */}
-                    <div>
-                      <div className="mb-1.5 text-xs font-medium text-muted-foreground">
-                        Final Score
+                    {/* Final score selection OR escalated state */}
+                    {isEscalated ? (
+                      <div className="flex items-center justify-between rounded-lg bg-primary/5 px-3 py-2 text-xs">
+                        <span className="text-muted-foreground">
+                          Waiting on adjudicator to resolve.
+                        </span>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 gap-1 px-2 text-xs"
+                          disabled={isEscalatingThis}
+                          onClick={() => handleWithdrawEscalation(disc.dimensionId)}
+                        >
+                          {isEscalatingThis ? (
+                            <Loader2 className="size-3 animate-spin" />
+                          ) : (
+                            <>
+                              <Undo2 className="size-3" />
+                              Withdraw
+                            </>
+                          )}
+                        </Button>
                       </div>
-                      <div className="flex flex-wrap gap-2">
-                        {scaleOptions.map((val) => {
-                          const label = scoreLabels[val]
-                          const isSelected = finalValue === val
-                          return (
-                            <button
-                              key={val}
-                              onClick={() =>
-                                handleFinalScoreChange(disc.dimensionId, val)
-                              }
-                              className={`flex flex-col items-center rounded-xl border-2 px-3 py-2 text-center transition-all duration-200 ${
-                                isSelected
-                                  ? getSelectedScoreColor(
-                                      val,
-                                      disc.scaleMin,
-                                      disc.scaleMax
-                                    )
-                                  : `${getScoreColor(val, disc.scaleMin, disc.scaleMax)} hover:shadow-md`
-                              }`}
-                            >
-                              <span className="text-lg font-bold">{val}</span>
-                              {label && (
-                                <span className="mt-0.5 text-[10px] font-medium leading-tight">
-                                  {label.label}
-                                </span>
-                              )}
-                            </button>
-                          )
-                        })}
-                      </div>
-                    </div>
+                    ) : (
+                      <>
+                        <div>
+                          <div className="mb-1.5 text-xs font-medium text-muted-foreground">
+                            Final Score
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            {scaleOptions.map((val) => {
+                              const label = scoreLabels[val]
+                              const isSelected = finalValue === val
+                              return (
+                                <button
+                                  key={val}
+                                  onClick={() =>
+                                    handleFinalScoreChange(disc.dimensionId, val)
+                                  }
+                                  className={`flex flex-col items-center rounded-xl border-2 px-3 py-2 text-center transition-all duration-200 ${
+                                    isSelected
+                                      ? getSelectedScoreColor(
+                                          val,
+                                          disc.scaleMin,
+                                          disc.scaleMax
+                                        )
+                                      : `${getScoreColor(val, disc.scaleMin, disc.scaleMax)} hover:shadow-md`
+                                  }`}
+                                >
+                                  <span className="text-lg font-bold">{val}</span>
+                                  {label && (
+                                    <span className="mt-0.5 text-[10px] font-medium leading-tight">
+                                      {label.label}
+                                    </span>
+                                  )}
+                                </button>
+                              )
+                            })}
+                          </div>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 gap-1 self-start px-2 text-xs"
+                          disabled={isEscalatingThis || !hasAdjudicator}
+                          title={
+                            !hasAdjudicator
+                              ? 'An admin must assign an adjudicator to this batch before you can escalate.'
+                              : undefined
+                          }
+                          onClick={() => handleEscalate(disc.dimensionId)}
+                        >
+                          {isEscalatingThis ? (
+                            <Loader2 className="size-3 animate-spin" />
+                          ) : (
+                            <>
+                              <Flag className="size-3" />
+                              Need Adjudicator
+                            </>
+                          )}
+                        </Button>
+                      </>
+                    )}
                   </div>
                 )
               })}
@@ -581,13 +779,50 @@ export function ReconcileClient({
                 </div>
               )}
 
-              {/* Notes */}
+              {/* Coders' original notes (read-only) — only shown when present.
+                  Added per 2026-04-09 meeting: helps the pair remember why
+                  they scored the way they did when reconciling later. */}
+              {currentItem &&
+                currentItem.coders.some((c) => c.notes && c.notes.trim()) && (
+                  <div className="border-t pt-4">
+                    <div className="mb-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                      Coder Notes
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      {currentItem.coders
+                        .filter((c) => c.notes && c.notes.trim())
+                        .map((coder) => (
+                          <div
+                            key={coder.userId}
+                            className="rounded-lg bg-muted/30 px-3 py-2"
+                          >
+                            <div className="mb-1 text-xs font-medium text-muted-foreground">
+                              {coder.name || coder.email}
+                            </div>
+                            <div className="whitespace-pre-wrap text-sm text-foreground">
+                              {coder.notes}
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                )}
+
+              {/* Reconciliation notes — the pair's final rationale. Ships in
+                  the export alongside the reconciled score. */}
               <div className="border-t pt-4">
                 <Label className="text-sm font-semibold text-foreground">
-                  Notes (optional)
+                  Why we decided what we did{' '}
+                  <span className="font-normal text-muted-foreground">
+                    (optional)
+                  </span>
                 </Label>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Brief rationale for the final scores. Included with the
+                  reconciled scores in the export.
+                </p>
                 <Textarea
-                  placeholder="Notes about this reconciliation decision..."
+                  placeholder="e.g. Agreed a 2 on Criterion 1 because the feedback hedges the claim..."
                   value={currentState?.notes ?? ''}
                   onChange={(e) => handleNotesChange(e.target.value)}
                   className="mt-2 text-sm"
