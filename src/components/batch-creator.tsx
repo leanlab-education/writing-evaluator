@@ -1,13 +1,6 @@
 'use client'
 
 import { useState, useCallback, useEffect } from 'react'
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -19,7 +12,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog'
-import { Loader2, Plus, Shuffle } from 'lucide-react'
+import { ChevronRight, Loader2, Plus, Shuffle } from 'lucide-react'
 import { batchStatusColors, batchStatusLabels } from '@/lib/status-colors'
 
 // ---------------------------------------------------------------------------
@@ -127,6 +120,17 @@ export function BatchCreator({
   const [selectedEvaluatorByBatch, setSelectedEvaluatorByBatch] = useState<
     Record<string, string>
   >({})
+
+  // Expanded batch rows
+  const [expandedBatches, setExpandedBatches] = useState<Set<string>>(new Set())
+  const toggleExpanded = (batchId: string) => {
+    setExpandedBatches((prev) => {
+      const next = new Set(prev)
+      if (next.has(batchId)) next.delete(batchId)
+      else next.add(batchId)
+      return next
+    })
+  }
 
   // ---------------------------------------------------------------------------
   // Data fetching
@@ -658,8 +662,8 @@ export function BatchCreator({
           assign items to evaluators.
         </div>
       ) : (
-        <div className="space-y-2">
-          {filteredBatches.map((batch) => {
+        <div className="rounded-md border border-border">
+          {filteredBatches.map((batch, idx) => {
             const pct =
               batch.itemCount > 0
                 ? Math.round(
@@ -671,9 +675,9 @@ export function BatchCreator({
             const assignmentLabel = isTraining
               ? 'Training'
               : evaluatorCount >= 2
-                ? 'Double-Scored'
+                ? 'Double'
                 : evaluatorCount === 1
-                  ? 'Independent'
+                  ? 'Single'
                   : 'Unassigned'
             const assignmentBadgeClass = isTraining
               ? 'bg-status-active-bg text-status-active-text'
@@ -688,222 +692,243 @@ export function BatchCreator({
             const canAddMore = evaluatorCount < maxEvaluators
             const selectedEvaluator =
               selectedEvaluatorByBatch[batch.id] ?? ''
+            const isExpanded = expandedBatches.has(batch.id)
 
             return (
-              <Card
+              <div
                 key={batch.id}
-                className="transition-all duration-200 hover:shadow-sm hover:ring-1 hover:ring-primary/10"
+                className={idx > 0 ? 'border-t border-border' : ''}
               >
-                <CardContent className="space-y-2 py-3">
-                  {/* Line 1: name + badges + status + progress */}
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex min-w-0 flex-1 items-center gap-2">
-                      <span className="truncate text-sm font-semibold">
-                        {batch.name}
-                      </span>
-                      <Badge
-                        className={`${batchStatusColors[batch.status] || ''} shrink-0`}
-                      >
-                        {batchStatusLabels[batch.status] || batch.status}
-                      </Badge>
-                      <Badge
-                        className={`${assignmentBadgeClass} shrink-0`}
-                      >
-                        {assignmentLabel}
-                      </Badge>
-                      {batch.isHidden && (
-                        <Badge
-                          variant="outline"
-                          className="shrink-0 border-muted-foreground/30 bg-muted text-[10px] text-muted-foreground"
-                        >
-                          Hidden
-                        </Badge>
-                      )}
-                    </div>
-                    <div className="flex shrink-0 items-center gap-2">
-                      {batch.irrPct != null && (
-                        <Badge
-                          className={
-                            batch.irrPct >= 80
-                              ? 'bg-score-high-bg text-score-high-text'
-                              : batch.irrPct >= 60
-                                ? 'bg-status-active-bg text-status-active-text'
-                                : 'bg-destructive/10 text-destructive'
-                          }
-                          title="Inter-rater reliability: % of scored (item, criterion) pairs where both evaluators gave the same value."
-                        >
-                          IRR {batch.irrPct}%
-                        </Badge>
-                      )}
-                      <span className="text-xs tabular-nums text-muted-foreground">
-                        {batch.status === 'RECONCILING' &&
-                        batch.discrepancyCount != null
-                          ? `${batch.reconciledCount ?? 0}/${batch.discrepancyCount} reconciled`
-                          : `${batch.scoredItemCount}/${batch.itemCount} (${pct}%)`}
-                      </span>
-                      <select
-                        className="flex h-7 rounded-md border border-input bg-background px-2 py-0.5 text-xs shadow-sm transition-colors"
-                        value={batch.status}
-                        onChange={(e) =>
-                          handleBatchStatusChange(batch.id, e.target.value)
-                        }
-                      >
-                        <option value="DRAFT">Draft</option>
-                        <option value="SCORING">Scoring</option>
-                        <option value="RECONCILING">Reconciling</option>
-                        <option value="COMPLETE">Complete</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  {/* Line 2: metadata + progress bar */}
-                  <div className="flex items-center gap-3">
-                    <span className="shrink-0 text-xs text-muted-foreground">
-                      {batch.itemCount} items
-                      {batch.activityId && ` · Activity ${batch.activityId}`}
-                      {batch.conjunctionId && ` · ${batch.conjunctionId}`}
-                    </span>
-                    <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+                {/* Compact row */}
+                <div
+                  className="flex cursor-pointer items-center gap-2 px-3 py-2 transition-colors hover:bg-muted/50"
+                  onClick={() => toggleExpanded(batch.id)}
+                >
+                  <ChevronRight
+                    className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`}
+                  />
+                  <span className="min-w-0 truncate text-sm font-medium">
+                    {batch.name}
+                  </span>
+                  <Badge
+                    className={`${batchStatusColors[batch.status] || ''} shrink-0 text-[10px]`}
+                  >
+                    {batchStatusLabels[batch.status] || batch.status}
+                  </Badge>
+                  <Badge
+                    className={`${assignmentBadgeClass} shrink-0 text-[10px]`}
+                  >
+                    {assignmentLabel}
+                  </Badge>
+                  {batch.isHidden && (
+                    <Badge
+                      variant="outline"
+                      className="shrink-0 border-muted-foreground/30 text-[10px] text-muted-foreground"
+                    >
+                      Hidden
+                    </Badge>
+                  )}
+                  {batch.irrPct != null && (
+                    <Badge
+                      className={`shrink-0 text-[10px] ${
+                        batch.irrPct >= 80
+                          ? 'bg-score-high-bg text-score-high-text'
+                          : batch.irrPct >= 60
+                            ? 'bg-status-active-bg text-status-active-text'
+                            : 'bg-destructive/10 text-destructive'
+                      }`}
+                    >
+                      IRR {batch.irrPct}%
+                    </Badge>
+                  )}
+                  <div className="ml-auto flex shrink-0 items-center gap-2">
+                    <div className="h-1.5 w-16 overflow-hidden rounded-full bg-muted">
                       <div
                         className="h-full rounded-full bg-primary transition-all duration-300"
                         style={{ width: `${pct}%` }}
                       />
                     </div>
-                  </div>
-
-                  {/* Line 3: evaluators + add-evaluator control */}
-                  <div className="flex flex-wrap items-center gap-2">
-                    {batch.evaluators.length === 0 ? (
-                      <span className="text-xs text-muted-foreground/60">
-                        No evaluators
+                    <span className="w-20 text-right text-xs tabular-nums text-muted-foreground">
+                      {batch.status === 'RECONCILING' &&
+                      batch.discrepancyCount != null
+                        ? `${batch.reconciledCount ?? 0}/${batch.discrepancyCount} rec.`
+                        : `${batch.scoredItemCount}/${batch.itemCount}`}
+                    </span>
+                    {batch.evaluators.length > 0 && (
+                      <span className="text-xs text-muted-foreground">
+                        {batch.evaluators
+                          .map((ev) => ev.name?.split(' ')[0] || ev.email.split('@')[0])
+                          .join(', ')}
                       </span>
-                    ) : (
-                      batch.evaluators.map((ev) => (
-                        <Badge
-                          key={ev.id}
-                          variant="secondary"
-                          className="gap-1"
-                        >
-                          {ev.name || ev.email}
-                          <button
-                            onClick={() =>
-                              handleRemoveEvaluator(batch.id, ev.id)
-                            }
-                            className="ml-1 text-muted-foreground hover:text-destructive"
-                            aria-label={`Remove ${ev.name || ev.email}`}
-                          >
-                            &times;
-                          </button>
-                        </Badge>
-                      ))
                     )}
+                  </div>
+                </div>
 
-                    {canAddMore && evaluators.length > 0 && (
-                      <div className="ml-auto flex items-center gap-1">
+                {/* Expanded details */}
+                {isExpanded && (
+                  <div className="space-y-3 border-t border-border/50 bg-muted/20 px-3 py-3 pl-8">
+                    {/* Meta */}
+                    <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                      <span>{batch.itemCount} items</span>
+                      {batch.activityId && <span>Activity {batch.activityId}</span>}
+                      {batch.conjunctionId && <span>{batch.conjunctionId}</span>}
+                      <div className="ml-auto flex items-center gap-2">
+                        <span className="text-muted-foreground">Status:</span>
                         <select
                           className="flex h-7 rounded-md border border-input bg-background px-2 py-0.5 text-xs shadow-sm transition-colors"
-                          value={selectedEvaluator}
-                          onChange={(e) =>
-                            setSelectedEvaluatorByBatch((prev) => ({
-                              ...prev,
-                              [batch.id]: e.target.value,
-                            }))
-                          }
+                          value={batch.status}
+                          onChange={(e) => {
+                            e.stopPropagation()
+                            handleBatchStatusChange(batch.id, e.target.value)
+                          }}
+                          onClick={(e) => e.stopPropagation()}
                         >
-                          <option value="">
-                            {evaluatorCount === 0
-                              ? 'Assign evaluator…'
-                              : isTraining
-                                ? 'Add another…'
-                                : 'Add for double-scoring…'}
-                          </option>
-                          {evaluators
-                            .filter(
-                              (ev) =>
-                                !batch.evaluators.some(
-                                  (be) => be.id === ev.user.id
+                          <option value="DRAFT">Draft</option>
+                          <option value="SCORING">Scoring</option>
+                          <option value="RECONCILING">Reconciling</option>
+                          <option value="COMPLETE">Complete</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Evaluators */}
+                    <div className="flex flex-wrap items-center gap-2">
+                      {batch.evaluators.length === 0 ? (
+                        <span className="text-xs text-muted-foreground/60">
+                          No evaluators assigned
+                        </span>
+                      ) : (
+                        batch.evaluators.map((ev) => (
+                          <Badge
+                            key={ev.id}
+                            variant="secondary"
+                            className="gap-1"
+                          >
+                            {ev.name || ev.email}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleRemoveEvaluator(batch.id, ev.id)
+                              }}
+                              className="ml-1 text-muted-foreground hover:text-destructive"
+                              aria-label={`Remove ${ev.name || ev.email}`}
+                            >
+                              &times;
+                            </button>
+                          </Badge>
+                        ))
+                      )}
+
+                      {canAddMore && evaluators.length > 0 && (
+                        <div className="ml-auto flex items-center gap-1">
+                          <select
+                            className="flex h-7 rounded-md border border-input bg-background px-2 py-0.5 text-xs shadow-sm transition-colors"
+                            value={selectedEvaluator}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={(e) =>
+                              setSelectedEvaluatorByBatch((prev) => ({
+                                ...prev,
+                                [batch.id]: e.target.value,
+                              }))
+                            }
+                          >
+                            <option value="">
+                              {evaluatorCount === 0
+                                ? 'Assign evaluator…'
+                                : isTraining
+                                  ? 'Add another…'
+                                  : 'Add for double-scoring…'}
+                            </option>
+                            {evaluators
+                              .filter(
+                                (ev) =>
+                                  !batch.evaluators.some(
+                                    (be) => be.id === ev.user.id
+                                  )
+                              )
+                              .map((ev) => (
+                                <option key={ev.user.id} value={ev.user.id}>
+                                  {ev.user.name || ev.user.email}
+                                </option>
+                              ))}
+                          </select>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 px-2 text-xs"
+                            disabled={
+                              !selectedEvaluator ||
+                              assigningBatch === batch.id
+                            }
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              if (selectedEvaluator) {
+                                handleAssignEvaluator(
+                                  batch.id,
+                                  selectedEvaluator
                                 )
-                            )
-                            .map((ev) => (
+                              }
+                            }}
+                          >
+                            {assigningBatch === batch.id ? (
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                            ) : (
+                              'Add'
+                            )}
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Adjudicator + visibility */}
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+                      {evaluatorCount >= 2 && !isTraining && (
+                        <div className="flex items-center gap-2">
+                          <span className="text-muted-foreground">
+                            Adjudicator:
+                          </span>
+                          <select
+                            className="flex h-7 rounded-md border border-input bg-background px-2 py-0.5 text-xs shadow-sm transition-colors"
+                            value={batch.adjudicatorId ?? ''}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={(e) =>
+                              handleAdjudicatorChange(
+                                batch.id,
+                                e.target.value || null
+                              )
+                            }
+                          >
+                            <option value="">— None —</option>
+                            {evaluators.map((ev) => (
                               <option key={ev.user.id} value={ev.user.id}>
                                 {ev.user.name || ev.user.email}
                               </option>
                             ))}
-                        </select>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="h-7 px-2 text-xs"
-                          disabled={
-                            !selectedEvaluator ||
-                            assigningBatch === batch.id
-                          }
-                          onClick={() => {
-                            if (selectedEvaluator) {
-                              handleAssignEvaluator(
-                                batch.id,
-                                selectedEvaluator
-                              )
-                            }
-                          }}
-                        >
-                          {assigningBatch === batch.id ? (
-                            <Loader2 className="h-3 w-3 animate-spin" />
-                          ) : (
-                            'Add'
+                          </select>
+                          {!batch.adjudicatorId && (
+                            <span className="text-muted-foreground/60">
+                              (needed before the pair can escalate)
+                            </span>
                           )}
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Line 4: adjudicator (Double-Scored only) + visibility */}
-                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
-                    {evaluatorCount >= 2 && !isTraining && (
-                      <div className="flex items-center gap-2">
-                        <span className="text-muted-foreground">
-                          Adjudicator:
-                        </span>
-                        <select
-                          className="flex h-7 rounded-md border border-input bg-background px-2 py-0.5 text-xs shadow-sm transition-colors"
-                          value={batch.adjudicatorId ?? ''}
+                        </div>
+                      )}
+                      <label className="flex cursor-pointer items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          checked={!!batch.isHidden}
                           onChange={(e) =>
-                            handleAdjudicatorChange(
-                              batch.id,
-                              e.target.value || null
-                            )
+                            handleVisibilityChange(batch.id, e.target.checked)
                           }
-                        >
-                          <option value="">— None —</option>
-                          {evaluators.map((ev) => (
-                            <option key={ev.user.id} value={ev.user.id}>
-                              {ev.user.name || ev.user.email}
-                            </option>
-                          ))}
-                        </select>
-                        {!batch.adjudicatorId && (
-                          <span className="text-muted-foreground/60">
-                            (needed before the pair can escalate)
-                          </span>
-                        )}
-                      </div>
-                    )}
-                    <label className="flex cursor-pointer items-center gap-1.5">
-                      <input
-                        type="checkbox"
-                        checked={!!batch.isHidden}
-                        onChange={(e) =>
-                          handleVisibilityChange(batch.id, e.target.checked)
-                        }
-                        className="size-3.5 rounded border-input"
-                      />
-                      <span className="text-muted-foreground">
-                        Hidden from annotators
-                      </span>
-                    </label>
+                          className="size-3.5 rounded border-input"
+                        />
+                        <span className="text-muted-foreground">
+                          Hidden from annotators
+                        </span>
+                      </label>
+                    </div>
                   </div>
-                </CardContent>
-              </Card>
+                )}
+              </div>
             )
           })}
         </div>

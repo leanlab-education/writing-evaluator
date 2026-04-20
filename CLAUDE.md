@@ -32,7 +32,7 @@ Same as StudyFlow: **do it right the first time.** No bandaid fixes, no duplicat
 ## Commands
 
 ```bash
-npm run dev          # Start dev server (uses doppler run to inject env vars)
+npm run dev          # Start dev server on port 3333 (uses doppler run to inject env vars)
 npm run build        # Production build
 npm run lint         # ESLint
 npx prisma generate  # Regenerate Prisma client after schema changes

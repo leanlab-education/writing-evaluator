@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "doppler run --project writing-evaluator --config dev -- next dev",
+    "dev": "doppler run --project writing-evaluator --config dev -- next dev -p 3333",
     "build": "prisma generate && next build",
     "start": "next start",
     "lint": "eslint"
