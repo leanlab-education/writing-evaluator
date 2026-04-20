@@ -9,7 +9,7 @@ function getResend() {
 }
 
 function getAppUrl() {
-  return process.env.APP_URL || 'http://localhost:3000'
+  return process.env.APP_URL || 'https://writing-evaluator.vercel.app'
 }
 
 export async function sendInviteEmail(email: string, token: string, name?: string | null, role?: string) {

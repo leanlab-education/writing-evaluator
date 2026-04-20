@@ -50,7 +50,7 @@ async function main() {
     data: { email: normalized, token, type: 'INVITE', expiresAt },
   })
 
-  const appUrl = process.env.APP_URL || 'http://localhost:3333'
+  const appUrl = process.env.APP_URL || 'https://writing-evaluator.vercel.app'
   console.log(`\nInvite link (expires in 72h):\n${appUrl}/invite/${token}`)
 
   await prisma.$disconnect()
