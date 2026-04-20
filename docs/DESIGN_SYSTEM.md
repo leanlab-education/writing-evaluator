@@ -107,3 +107,4 @@ Client component. Toggles `.dark` class, persists to localStorage.
 8. **Typography**: Use `text-foreground` for primary, `text-muted-foreground` for secondary
 9. **Success states**: Use `text-success` / `bg-success/10`, not green-*
 10. **Error states**: Use `text-destructive`, not red-*
+11. **Native `<select>` dropdowns**: Globally styled in `globals.css` (outside any `@layer` for specificity). Uses `appearance: none` with a custom chevron SVG positioned `right 0.75rem center` and `padding-right: 1.75rem` to give the arrow breathing room from the right edge. No per-component arrow styling needed — just use a plain `<select>` element.

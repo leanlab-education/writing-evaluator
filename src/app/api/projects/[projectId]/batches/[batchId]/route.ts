@@ -104,5 +104,34 @@ export async function PATCH(
   return NextResponse.json(updated)
 }
 
-// autoReconcileAgreedScores moved to src/lib/reconciliation.ts so it can be
-// shared with the auto-transition path in the scores API.
+export async function DELETE(
+  _request: NextRequest,
+  { params }: { params: Promise<{ projectId: string; batchId: string }> }
+) {
+  const session = await auth()
+  if (!session?.user || session.user.role !== 'ADMIN') {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+
+  const { projectId, batchId } = await params
+
+  const batch = await prisma.batch.findUnique({
+    where: { id: batchId },
+    select: { status: true, projectId: true },
+  })
+
+  if (!batch || batch.projectId !== projectId) {
+    return NextResponse.json({ error: 'Batch not found' }, { status: 404 })
+  }
+
+  if (batch.status !== 'DRAFT') {
+    return NextResponse.json(
+      { error: 'Only DRAFT batches can be deleted' },
+      { status: 400 }
+    )
+  }
+
+  await prisma.batch.delete({ where: { id: batchId } })
+
+  return NextResponse.json({ success: true })
+}

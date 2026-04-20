@@ -377,6 +377,22 @@ export function BatchCreator({
     }
   }
 
+  async function handleDeleteBatch(batchId: string) {
+    if (!confirm('Delete this batch? Items will return to the unbatched pool.')) return
+    try {
+      const res = await fetch(
+        `/api/projects/${projectId}/batches/${batchId}`,
+        { method: 'DELETE' }
+      )
+      if (res.ok) {
+        onBatchesChange()
+        fetchUnbatchedStats()
+      }
+    } catch (err) {
+      console.error('Failed to delete batch:', err)
+    }
+  }
+
   async function handleVisibilityChange(batchId: string, isHidden: boolean) {
     try {
       const res = await fetch(
@@ -925,6 +941,19 @@ export function BatchCreator({
                           Hidden from annotators
                         </span>
                       </label>
+                      {batch.status === 'DRAFT' && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="ml-auto h-6 px-2 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleDeleteBatch(batch.id)
+                          }}
+                        >
+                          Delete
+                        </Button>
+                      )}
                     </div>
                   </div>
                 )}
