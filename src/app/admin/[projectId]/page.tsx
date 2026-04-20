@@ -15,7 +15,7 @@ export default async function ProjectDetailPage({
   const { projectId } = await params
 
   // Fetch all data in parallel
-  const [project, evaluatorsRaw, scoredItems] = await Promise.all([
+  const [project, evaluatorsRaw, scoredItems, feedbackItemsResult, feedbackItemsCount, unassignedCount, allItemsForFilters] = await Promise.all([
     prisma.project.findUnique({
       where: { id: projectId },
       include: {
@@ -49,7 +49,52 @@ export default async function ProjectDetailPage({
       select: { feedbackItemId: true },
       distinct: ['feedbackItemId'],
     }),
+    prisma.feedbackItem.findMany({
+      where: { projectId },
+      select: {
+        id: true,
+        feedbackId: true,
+        activityId: true,
+        conjunctionId: true,
+        batchId: true,
+        batch: { select: { id: true, name: true, type: true, status: true } },
+      },
+      orderBy: [
+        { activityId: 'asc' },
+        { conjunctionId: 'asc' },
+        { feedbackId: 'asc' },
+      ],
+      take: 50,
+    }),
+    prisma.feedbackItem.count({ where: { projectId } }),
+    prisma.feedbackItem.count({ where: { projectId, batchId: null } }),
+    prisma.feedbackItem.findMany({
+      where: { projectId },
+      select: { activityId: true, conjunctionId: true },
+    }),
   ])
+
+  const activityIds = [
+    ...new Set(
+      allItemsForFilters
+        .map((i) => i.activityId)
+        .filter((v): v is string => Boolean(v))
+    ),
+  ].sort()
+  const conjunctionIds = [
+    ...new Set(
+      allItemsForFilters
+        .map((i) => i.conjunctionId)
+        .filter((v): v is string => Boolean(v))
+    ),
+  ].sort()
+
+  const initialFeedbackItemsData = {
+    items: feedbackItemsResult,
+    total: feedbackItemsCount,
+    unassignedTotal: unassignedCount,
+    filterOptions: { activityIds, conjunctionIds },
+  }
 
   if (!project) notFound()
 
@@ -87,6 +132,7 @@ export default async function ProjectDetailPage({
       initialProject={serializedProject}
       initialEvaluators={evaluators}
       initialScoredItemCount={scoredItems.length}
+      initialFeedbackItemsData={initialFeedbackItemsData}
     />
   )
 }

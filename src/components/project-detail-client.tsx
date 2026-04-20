@@ -47,6 +47,7 @@ import { statusColors } from '@/lib/status-colors'
 import { TeamManagement } from '@/components/team-management'
 import { BatchCreator } from '@/components/batch-creator'
 import { ImportEvaluatorsDialog } from '@/components/import-evaluators-dialog'
+import { FeedbackItemsTab, type FeedbackItemRow } from '@/components/feedback-items-tab'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -114,10 +115,17 @@ export function ProjectDetailClient({
   initialProject,
   initialEvaluators,
   initialScoredItemCount,
+  initialFeedbackItemsData,
 }: {
   initialProject: Project
   initialEvaluators: EvaluatorRow[]
   initialScoredItemCount: number
+  initialFeedbackItemsData: {
+    items: FeedbackItemRow[]
+    total: number
+    unassignedTotal: number
+    filterOptions: { activityIds: string[]; conjunctionIds: string[] }
+  }
 }) {
   const router = useRouter()
   const projectId = initialProject.id
@@ -375,6 +383,7 @@ export function ProjectDetailClient({
             <TabsTrigger value="evaluators">Annotators</TabsTrigger>
             <TabsTrigger value="teams">Teams</TabsTrigger>
             <TabsTrigger value="batches">Batches</TabsTrigger>
+            <TabsTrigger value="items">Items</TabsTrigger>
             <TabsTrigger value="rubric">Rubric</TabsTrigger>
             <TabsTrigger value="export">Export</TabsTrigger>
           </TabsList>
@@ -668,6 +677,20 @@ export function ProjectDetailClient({
               batches={batches}
               onBatchesChange={fetchBatches}
               batchesLoading={batchesLoading}
+            />
+          </TabsContent>
+
+          {/* ============== ITEMS TAB ============== */}
+          <TabsContent value="items" className="mt-6 space-y-4">
+            <div>
+              <h2 className="text-lg font-semibold">Feedback Items</h2>
+              <p className="text-sm text-muted-foreground">
+                All feedback items in this project and their batch assignment.
+              </p>
+            </div>
+            <FeedbackItemsTab
+              projectId={projectId}
+              initialData={initialFeedbackItemsData}
             />
           </TabsContent>
 

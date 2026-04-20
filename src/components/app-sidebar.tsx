@@ -15,6 +15,7 @@ import {
   UserCheck,
   UsersRound,
   Layers,
+  List,
   Ruler,
   Download,
   ChevronRight,
@@ -46,6 +47,7 @@ const PROJECT_SUB_NAV = [
   { value: 'evaluators', label: 'Annotators', icon: <UserCheck className="size-3.5 shrink-0" /> },
   { value: 'teams', label: 'Teams', icon: <UsersRound className="size-3.5 shrink-0" /> },
   { value: 'batches', label: 'Batches', icon: <Layers className="size-3.5 shrink-0" /> },
+  { value: 'items', label: 'Items', icon: <List className="size-3.5 shrink-0" /> },
   { value: 'rubric', label: 'Rubric', icon: <Ruler className="size-3.5 shrink-0" /> },
   { value: 'export', label: 'Export', icon: <Download className="size-3.5 shrink-0" /> },
 ]
