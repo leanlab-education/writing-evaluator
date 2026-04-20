@@ -128,7 +128,7 @@ export function ImportEvaluatorsDialog({ projectId, onImported }: ImportEvaluato
       </DialogTrigger>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>Import Evaluators from StudyFlow</DialogTitle>
+          <DialogTitle>Import Annotators from StudyFlow</DialogTitle>
         </DialogHeader>
 
         {loading && (
@@ -226,7 +226,7 @@ export function ImportEvaluatorsDialog({ projectId, onImported }: ImportEvaluato
                     Importing...
                   </>
                 ) : (
-                  `Import ${importableCount} Evaluator${importableCount !== 1 ? 's' : ''}`
+                  `Import ${importableCount} Annotator${importableCount !== 1 ? 's' : ''}`
                 )}
               </Button>
             </div>

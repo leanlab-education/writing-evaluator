@@ -122,7 +122,7 @@ export default async function HomePage() {
   return (
     <EvaluatorDashboard
       projects={projects}
-      userName={session.user.name || session.user.email || 'Evaluator'}
+      userName={session.user.name || session.user.email || 'Annotator'}
     />
   )
 }

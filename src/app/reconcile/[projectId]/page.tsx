@@ -41,7 +41,7 @@ export default async function ReconcilePage({
       projectId={projectId}
       batchId={batchId}
       batchName={batch.name}
-      userName={session.user.name || session.user.email || 'Evaluator'}
+      userName={session.user.name || session.user.email || 'Annotator'}
     />
   )
 }

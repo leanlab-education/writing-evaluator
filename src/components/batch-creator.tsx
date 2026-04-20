@@ -421,7 +421,7 @@ export function BatchCreator({
         <div>
           <h2 className="text-lg font-semibold">Batches</h2>
           <p className="text-sm text-muted-foreground">
-            Create batches by filtering items, then assign to evaluators.
+            Create batches by filtering items, then assign to annotators.
             {unbatchedStats && (
               <span className="ml-1 font-medium">
                 {unbatchedStats.totalUnbatched} unbatched items remaining.
@@ -462,12 +462,18 @@ export function BatchCreator({
                     Training
                   </Button>
                 </div>
-                {batchType === 'TRAINING' && (
+                {batchType === 'REGULAR' ? (
                   <p className="text-xs text-muted-foreground">
-                    All evaluators will score every rubric criterion for these
-                    items. Use for initial onboarding before teams are assigned.
+                    Teams are assigned specific criteria. Each annotator scores only their team&apos;s criteria for these items.
+                  </p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    All annotators score every rubric criterion. Use for onboarding before teams are assigned.
                   </p>
                 )}
+                <p className="text-xs text-muted-foreground/60">
+                  Tip: you can create multiple batches with different types from the same filters.
+                </p>
               </div>
 
               {/* Scope to a specific import (rolling upload workflow) */}
@@ -811,7 +817,7 @@ export function BatchCreator({
                     <div className="flex flex-wrap items-center gap-2">
                       {batch.evaluators.length === 0 ? (
                         <span className="text-xs text-muted-foreground/60">
-                          No evaluators assigned
+                          No annotators assigned
                         </span>
                       ) : (
                         batch.evaluators.map((ev) => (
@@ -850,7 +856,7 @@ export function BatchCreator({
                           >
                             <option value="">
                               {evaluatorCount === 0
-                                ? 'Assign evaluator…'
+                                ? 'Assign annotator…'
                                 : isTraining
                                   ? 'Add another…'
                                   : 'Add for double-scoring…'}

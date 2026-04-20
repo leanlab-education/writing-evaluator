@@ -203,7 +203,7 @@ export function TeamClient({ users, currentUserId }: Props) {
                 className="h-7 px-2 text-xs"
                 disabled={loading}
                 onClick={() => handleChangeRole(user)}
-                title={`Change to ${isAdmin ? 'Evaluator' : 'Admin'}`}
+                title={`Change to ${isAdmin ? 'Annotator' : 'Admin'}`}
               >
                 <ArrowUpDown className="h-3 w-3" />
               </Button>
@@ -253,7 +253,7 @@ export function TeamClient({ users, currentUserId }: Props) {
                     onClick={() => setRole('EVALUATOR')}
                   >
                     <UserCheck className="mr-1.5 h-3.5 w-3.5" />
-                    Evaluator
+                    Annotator
                   </Button>
                   <Button
                     type="button"
@@ -329,14 +329,14 @@ export function TeamClient({ users, currentUserId }: Props) {
         </div>
       </div>
 
-      {/* Evaluators */}
+      {/* Annotators */}
       <div className="mt-8">
         <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-          Evaluators ({evaluators.length})
+          Annotators ({evaluators.length})
         </h2>
         {evaluators.length === 0 ? (
           <p className="mt-2 text-sm text-muted-foreground">
-            No evaluators yet. Invite them from here or from a project&apos;s Evaluators tab.
+            No annotators yet. Invite them from here or from a project&apos;s Annotators tab.
           </p>
         ) : (
           <div className="mt-2 rounded-md border border-border">
