@@ -231,7 +231,7 @@ export function ProjectDetailClient({
         if (data.invited) {
           setEvalSuccess('Invitation email sent!')
         } else if (data.alreadyHasPassword) {
-          setEvalSuccess('Evaluator added (already has an account).')
+          setEvalSuccess('Annotator added (already has an account).')
         }
         await fetchEvaluators()
         await fetchProject()
@@ -372,7 +372,7 @@ export function ProjectDetailClient({
           {/* Mobile-only tab list (sidebar handles desktop nav) */}
           <TabsList className="lg:hidden">
             <TabsTrigger value="overview">Overview</TabsTrigger>
-            <TabsTrigger value="evaluators">Evaluators</TabsTrigger>
+            <TabsTrigger value="evaluators">Annotators</TabsTrigger>
             <TabsTrigger value="teams">Teams</TabsTrigger>
             <TabsTrigger value="batches">Batches</TabsTrigger>
             <TabsTrigger value="rubric">Rubric</TabsTrigger>
@@ -403,7 +403,7 @@ export function ProjectDetailClient({
               </Card>
               <Card>
                 <CardHeader className="pb-2">
-                  <CardDescription>Evaluators</CardDescription>
+                  <CardDescription>Annotators</CardDescription>
                   <CardTitle className="text-2xl">
                     {project._count.evaluators}
                   </CardTitle>
@@ -443,7 +443,7 @@ export function ProjectDetailClient({
                   }
                 >
                   <Eye className="mr-2 h-4 w-4" />
-                  Preview Evaluator View
+                  Preview Annotator View
                 </Button>
               )}
 
@@ -492,10 +492,10 @@ export function ProjectDetailClient({
             </Card>
           </TabsContent>
 
-          {/* ============== EVALUATORS TAB ============== */}
+          {/* ============== ANNOTATORS TAB ============== */}
           <TabsContent value="evaluators" className="mt-6 space-y-4">
             <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold">Evaluators</h2>
+              <h2 className="text-lg font-semibold">Annotators</h2>
               <div className="flex gap-2">
                 <Button
                   variant="outline"
@@ -520,11 +520,11 @@ export function ProjectDetailClient({
                 <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
                   <DialogTrigger render={<Button />}>
                     <Plus className="mr-2 h-4 w-4" />
-                    Add Evaluator
+                    Add Annotator
                   </DialogTrigger>
                   <DialogContent>
                     <DialogHeader>
-                      <DialogTitle>Add Evaluator</DialogTitle>
+                      <DialogTitle>Add Annotator</DialogTitle>
                     </DialogHeader>
                     <form onSubmit={handleAddEvaluator} className="space-y-4">
                       <div className="space-y-2">
@@ -534,7 +534,7 @@ export function ProjectDetailClient({
                           type="email"
                           value={evalEmail}
                           onChange={(e) => setEvalEmail(e.target.value)}
-                          placeholder="evaluator@example.com"
+                          placeholder="annotator@example.com"
                           required
                         />
                       </div>
@@ -596,7 +596,7 @@ export function ProjectDetailClient({
 
             {evaluators.length === 0 ? (
               <div className="py-8 text-center text-sm text-muted-foreground">
-                No evaluators assigned to this project yet.
+                No annotators assigned to this project yet.
               </div>
             ) : (
               <div className="rounded-md border">

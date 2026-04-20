@@ -211,9 +211,9 @@ export function TeamManagement({ projectId, evaluators, rubricDimensions }: Prop
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-semibold">Evaluator Teams</h2>
+          <h2 className="text-lg font-semibold">Annotator Teams</h2>
           <p className="text-sm text-muted-foreground">
-            Pair evaluators and assign each team their rubric criteria.
+            Pair annotators and assign each team their rubric criteria.
           </p>
         </div>
         <Dialog open={createOpen} onOpenChange={setCreateOpen}>
@@ -223,7 +223,7 @@ export function TeamManagement({ projectId, evaluators, rubricDimensions }: Prop
           </DialogTrigger>
           <DialogContent className="max-w-md">
             <DialogHeader>
-              <DialogTitle>Create Evaluator Team</DialogTitle>
+              <DialogTitle>Create Annotator Team</DialogTitle>
             </DialogHeader>
             <form onSubmit={handleCreate} className="space-y-4">
               {/* Team name */}

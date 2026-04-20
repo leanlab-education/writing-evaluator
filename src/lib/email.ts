@@ -15,7 +15,7 @@ function getAppUrl() {
 export async function sendInviteEmail(email: string, token: string, name?: string | null, role?: string) {
   const url = `${getAppUrl()}/invite/${token}`
   const greeting = name ? `Hi ${name},` : 'Hi,'
-  const roleLabel = role === 'ADMIN' ? 'an admin' : 'an evaluator'
+  const roleLabel = role === 'ADMIN' ? 'an admin' : 'an annotator'
 
   await getResend().emails.send({
     from: FROM_EMAIL,

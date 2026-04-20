@@ -63,7 +63,7 @@ export default async function EvaluatePage({
   return (
     <EvaluateClient
       projectId={projectId}
-      userName={session.user.name || session.user.email || 'Evaluator'}
+      userName={session.user.name || session.user.email || 'Annotator'}
       batchId={batchId}
       batchType={batchType}
     />
