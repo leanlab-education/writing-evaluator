@@ -92,6 +92,11 @@ export function AppSidebar({ collapsed, onToggle, projectContext }: AppSidebarPr
           label: 'Projects',
           icon: <LayoutGrid className="size-4 shrink-0" />,
         },
+        {
+          href: '/admin/accounts',
+          label: 'Accounts',
+          icon: <UsersRound className="size-4 shrink-0" />,
+        },
       ]
     : [
         {
@@ -102,7 +107,8 @@ export function AppSidebar({ collapsed, onToggle, projectContext }: AppSidebarPr
       ]
 
   function isActive(href: string) {
-    if (href === '/admin') return pathname === '/admin' || pathname.startsWith('/admin/')
+    if (href === '/admin/accounts') return pathname === '/admin/accounts'
+    if (href === '/admin') return pathname === '/admin' || (pathname.startsWith('/admin/') && pathname !== '/admin/accounts')
     if (href === '/') return pathname === '/' || pathname.startsWith('/evaluate/')
     return pathname.startsWith(href)
   }

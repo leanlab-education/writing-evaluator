@@ -10,12 +10,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
-  const { email, name, projectId } = await request.json()
+  const { email, name, projectId, role } = await request.json()
 
   if (!email) {
     return NextResponse.json({ error: 'Email is required' }, { status: 400 })
   }
 
+  const assignedRole = role === 'ADMIN' ? 'ADMIN' : 'EVALUATOR'
   const normalizedEmail = email.trim().toLowerCase()
 
   // Find or create user (no password)
@@ -26,7 +27,7 @@ export async function POST(request: Request) {
       data: {
         email: normalizedEmail,
         name: name?.trim() || null,
-        role: 'EVALUATOR',
+        role: assignedRole,
       },
     })
   }
@@ -43,7 +44,7 @@ export async function POST(request: Request) {
   // Generate invite token and send email (only if user has no password)
   if (!user.hashedPassword) {
     const token = await createToken(normalizedEmail, 'INVITE')
-    await sendInviteEmail(normalizedEmail, token, user.name)
+    await sendInviteEmail(normalizedEmail, token, user.name, user.role)
   }
 
   return NextResponse.json({

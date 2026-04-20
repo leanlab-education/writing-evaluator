@@ -12,9 +12,10 @@ function getAppUrl() {
   return process.env.APP_URL || 'http://localhost:3000'
 }
 
-export async function sendInviteEmail(email: string, token: string, name?: string | null) {
+export async function sendInviteEmail(email: string, token: string, name?: string | null, role?: string) {
   const url = `${getAppUrl()}/invite/${token}`
   const greeting = name ? `Hi ${name},` : 'Hi,'
+  const roleLabel = role === 'ADMIN' ? 'an admin' : 'an evaluator'
 
   await getResend().emails.send({
     from: FROM_EMAIL,
@@ -24,7 +25,7 @@ export async function sendInviteEmail(email: string, token: string, name?: strin
       <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
         <h2>Writing Evaluator</h2>
         <p>${greeting}</p>
-        <p>You've been invited to join the Writing Evaluator as an evaluator. Click the link below to set your password and get started.</p>
+        <p>You've been invited to join the Writing Evaluator as ${roleLabel}. Click the link below to set your password and get started.</p>
         <p style="margin: 24px 0;">
           <a href="${url}" style="background: #5b21b6; color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; display: inline-block;">
             Set Your Password
