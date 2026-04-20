@@ -13,7 +13,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog'
-import { Loader2, Plus, Check, ShieldCheck, UserCheck } from 'lucide-react'
+import { Loader2, Plus, Check, ShieldCheck, UserCheck, Send, Trash2, ArrowUpDown } from 'lucide-react'
 
 interface User {
   id: string
@@ -26,9 +26,10 @@ interface User {
 
 interface Props {
   users: User[]
+  currentUserId: string
 }
 
-export function TeamClient({ users }: Props) {
+export function TeamClient({ users, currentUserId }: Props) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [email, setEmail] = useState('')
@@ -37,6 +38,7 @@ export function TeamClient({ users }: Props) {
   const [sending, setSending] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
+  const [actionLoading, setActionLoading] = useState<string | null>(null)
 
   const admins = users.filter((u) => u.role === 'ADMIN')
   const evaluators = users.filter((u) => u.role === 'EVALUATOR')
@@ -82,6 +84,144 @@ export function TeamClient({ users }: Props) {
     } finally {
       setSending(false)
     }
+  }
+
+  async function handleResendInvite(user: User) {
+    setActionLoading(user.id)
+    try {
+      const res = await fetch('/api/invite', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: user.email, name: user.name, role: user.role }),
+      })
+      if (res.ok) {
+        router.refresh()
+      }
+    } catch (err) {
+      console.error('Failed to resend invite:', err)
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  async function handleChangeRole(user: User) {
+    const newRole = user.role === 'ADMIN' ? 'EVALUATOR' : 'ADMIN'
+    const label = newRole === 'ADMIN' ? 'admin' : 'evaluator'
+    if (!confirm(`Change ${user.name || user.email} to ${label}?`)) return
+
+    setActionLoading(user.id)
+    try {
+      const res = await fetch(`/api/users/${user.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role: newRole }),
+      })
+      if (res.ok) {
+        router.refresh()
+      } else {
+        const err = await res.json()
+        alert(err.error || 'Failed to change role')
+      }
+    } catch (err) {
+      console.error('Failed to change role:', err)
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  async function handleDelete(user: User) {
+    if (!confirm(`Delete ${user.name || user.email}? This will remove all their scores, assignments, and team memberships. This cannot be undone.`)) return
+
+    setActionLoading(user.id)
+    try {
+      const res = await fetch(`/api/users/${user.id}`, { method: 'DELETE' })
+      if (res.ok) {
+        router.refresh()
+      } else {
+        const err = await res.json()
+        alert(err.error || 'Failed to delete user')
+      }
+    } catch (err) {
+      console.error('Failed to delete user:', err)
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  function UserRow({ user, idx }: { user: User; idx: number }) {
+    const isSelf = user.id === currentUserId
+    const isAdmin = user.role === 'ADMIN'
+    const loading = actionLoading === user.id
+
+    return (
+      <div
+        className={`flex items-center gap-3 px-3 py-2.5 ${idx > 0 ? 'border-t border-border' : ''}`}
+      >
+        {isAdmin ? (
+          <ShieldCheck className="h-4 w-4 shrink-0 text-primary" />
+        ) : (
+          <UserCheck className="h-4 w-4 shrink-0 text-muted-foreground" />
+        )}
+        <div className="min-w-0 flex-1">
+          <span className="text-sm font-medium">
+            {user.name || user.email}
+          </span>
+          {user.name && (
+            <span className="ml-2 text-xs text-muted-foreground">{user.email}</span>
+          )}
+          {isSelf && (
+            <span className="ml-2 text-xs text-muted-foreground">(you)</span>
+          )}
+        </div>
+        <div className="flex shrink-0 items-center gap-1.5">
+          {user.hasAccount ? (
+            <Badge variant="outline" className="text-[10px] text-success border-success/30">
+              Active
+            </Badge>
+          ) : (
+            <>
+              <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                Invited
+              </Badge>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 px-2 text-xs"
+                disabled={loading}
+                onClick={() => handleResendInvite(user)}
+                title="Resend invite email"
+              >
+                {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
+              </Button>
+            </>
+          )}
+          {!isSelf && (
+            <>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 px-2 text-xs"
+                disabled={loading}
+                onClick={() => handleChangeRole(user)}
+                title={`Change to ${isAdmin ? 'Evaluator' : 'Admin'}`}
+              >
+                <ArrowUpDown className="h-3 w-3" />
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 px-2 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"
+                disabled={loading}
+                onClick={() => handleDelete(user)}
+                title="Delete account"
+              >
+                <Trash2 className="h-3 w-3" />
+              </Button>
+            </>
+          )}
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -184,29 +324,7 @@ export function TeamClient({ users }: Props) {
         </h2>
         <div className="mt-2 rounded-md border border-border">
           {admins.map((user, idx) => (
-            <div
-              key={user.id}
-              className={`flex items-center gap-3 px-3 py-2.5 ${idx > 0 ? 'border-t border-border' : ''}`}
-            >
-              <ShieldCheck className="h-4 w-4 shrink-0 text-primary" />
-              <div className="min-w-0 flex-1">
-                <span className="text-sm font-medium">
-                  {user.name || user.email}
-                </span>
-                {user.name && (
-                  <span className="ml-2 text-xs text-muted-foreground">{user.email}</span>
-                )}
-              </div>
-              {user.hasAccount ? (
-                <Badge variant="outline" className="text-[10px] text-success border-success/30">
-                  Active
-                </Badge>
-              ) : (
-                <Badge variant="outline" className="text-[10px] text-muted-foreground">
-                  Invited
-                </Badge>
-              )}
-            </div>
+            <UserRow key={user.id} user={user} idx={idx} />
           ))}
         </div>
       </div>
@@ -223,29 +341,7 @@ export function TeamClient({ users }: Props) {
         ) : (
           <div className="mt-2 rounded-md border border-border">
             {evaluators.map((user, idx) => (
-              <div
-                key={user.id}
-                className={`flex items-center gap-3 px-3 py-2.5 ${idx > 0 ? 'border-t border-border' : ''}`}
-              >
-                <UserCheck className="h-4 w-4 shrink-0 text-muted-foreground" />
-                <div className="min-w-0 flex-1">
-                  <span className="text-sm font-medium">
-                    {user.name || user.email}
-                  </span>
-                  {user.name && (
-                    <span className="ml-2 text-xs text-muted-foreground">{user.email}</span>
-                  )}
-                </div>
-                {user.hasAccount ? (
-                  <Badge variant="outline" className="text-[10px] text-success border-success/30">
-                    Active
-                  </Badge>
-                ) : (
-                  <Badge variant="outline" className="text-[10px] text-muted-foreground">
-                    Invited
-                  </Badge>
-                )}
-              </div>
+              <UserRow key={user.id} user={user} idx={idx} />
             ))}
           </div>
         )}
