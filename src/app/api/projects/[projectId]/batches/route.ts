@@ -1,7 +1,25 @@
 import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/db'
+import { compareFeedbackIds } from '@/lib/feedback-id'
 import { computeBatchIRR } from '@/lib/irr'
+import {
+  getExpectedReleaseUserIds,
+  syncBatchAssignmentsForRelease,
+} from '@/lib/team-batch-releases'
 import { NextRequest, NextResponse } from 'next/server'
+
+interface BatchRangeInput {
+  startFeedbackId: string
+  endFeedbackId: string
+}
+
+interface IndexedItem {
+  id: string
+  feedbackId: string
+  batchId: string | null
+  activityId: string | null
+  conjunctionId: string | null
+}
 
 // GET /api/projects/[projectId]/batches — list batches with stats
 export async function GET(
@@ -15,7 +33,6 @@ export async function GET(
 
   const { projectId } = await params
 
-  // Evaluators can only access projects they're assigned to
   if (session.user.role !== 'ADMIN') {
     const membership = await prisma.projectEvaluator.findUnique({
       where: { projectId_userId: { projectId, userId: session.user.id } },
@@ -29,46 +46,60 @@ export async function GET(
     where: { projectId },
     include: {
       _count: { select: { feedbackItems: true } },
+      ranges: {
+        orderBy: { sortOrder: 'asc' },
+      },
       assignments: {
         include: {
           user: { select: { id: true, email: true, name: true } },
+          teamRelease: {
+            select: {
+              id: true,
+              isVisible: true,
+            },
+          },
         },
+      },
+      teamReleases: {
+        include: {
+          scorerUser: {
+            select: { id: true, email: true, name: true },
+          },
+          team: {
+            include: {
+              members: {
+                include: {
+                  user: {
+                    select: { id: true, email: true, name: true },
+                  },
+                },
+                orderBy: { user: { email: 'asc' } },
+              },
+              dimensions: {
+                include: {
+                  dimension: {
+                    select: { id: true, label: true, sortOrder: true },
+                  },
+                },
+                orderBy: { dimension: { sortOrder: 'asc' } },
+              },
+            },
+          },
+        },
+        orderBy: { team: { name: 'asc' } },
       },
     },
     orderBy: { sortOrder: 'asc' },
   })
 
-  // Fetch dimension count once — same for all batches in this project
-  const dimensionCount = await prisma.rubricDimension.count({
+  const projectDimensions = await prisma.rubricDimension.findMany({
     where: { projectId },
+    select: { id: true, label: true },
+    orderBy: { sortOrder: 'asc' },
   })
 
-  // For each batch, count scored items with a single groupBy query (no per-item loop)
   const batchesWithStats = await Promise.all(
     batches.map(async (batch) => {
-      let scoredItemCount = 0
-
-      if (dimensionCount > 0 && batch._count.feedbackItems > 0) {
-        // Find (feedbackItemId, userId) pairs that have scored all dimensions
-        const fullyScoredPairs = await prisma.score.groupBy({
-          by: ['feedbackItemId', 'userId'],
-          where: {
-            feedbackItem: { batchId: batch.id },
-            isReconciled: false,
-          },
-          _count: { dimensionId: true },
-          having: {
-            dimensionId: { _count: { gte: dimensionCount } },
-          },
-        })
-        // Count unique items that have at least one evaluator who scored all dimensions
-        scoredItemCount = new Set(fullyScoredPairs.map((p) => p.feedbackItemId))
-          .size
-      }
-
-      // IRR: only meaningful for exactly-2-evaluator batches with scores.
-      // Amber wants to see this displayed (Q2 answer: option B — display
-      // but release manually).
       let irrPct: number | null = null
       if (
         batch.assignments.length === 2 &&
@@ -81,7 +112,6 @@ export async function GET(
         irrPct = irr?.agreementPct ?? null
       }
 
-      // For RECONCILING batches, compute discrepancy stats
       let discrepancyCount: number | undefined
       let reconciledCount: number | undefined
       if (batch.status === 'RECONCILING') {
@@ -90,19 +120,108 @@ export async function GET(
           select: { feedbackItemId: true, dimensionId: true, value: true },
         })
         const scoreGroups = new Map<string, number[]>()
-        for (const s of origScores) {
-          const key = `${s.feedbackItemId}::${s.dimensionId}`
+        for (const score of origScores) {
+          const key = `${score.feedbackItemId}::${score.dimensionId}`
           if (!scoreGroups.has(key)) scoreGroups.set(key, [])
-          scoreGroups.get(key)!.push(s.value)
+          scoreGroups.get(key)!.push(score.value)
         }
         discrepancyCount = 0
-        for (const [, values] of scoreGroups) {
+        for (const values of scoreGroups.values()) {
           if (values.length === 2 && values[0] !== values[1]) discrepancyCount++
         }
         reconciledCount = await prisma.score.count({
           where: { feedbackItem: { batchId: batch.id }, isReconciled: true },
         })
       }
+
+      const teamReleases = await Promise.all(
+        batch.teamReleases.map(async (release) => {
+          const expectedUserIds = getExpectedReleaseUserIds({
+            ...release,
+            isDoubleScored: batch.isDoubleScored,
+            batchType: batch.type,
+          })
+          const dimensionIds =
+            batch.type === 'TRAINING'
+              ? projectDimensions.map((dimension) => dimension.id)
+              : release.team.dimensions.map((dimension) => dimension.dimensionId)
+          const expectedScoreCount =
+            batch._count.feedbackItems *
+            dimensionIds.length *
+            expectedUserIds.length
+
+          const actualScoreCount =
+            expectedScoreCount > 0
+              ? await prisma.score.count({
+                  where: {
+                    feedbackItem: { batchId: batch.id },
+                    userId: { in: expectedUserIds },
+                    dimensionId: { in: dimensionIds },
+                    isReconciled: false,
+                  },
+                })
+              : 0
+
+          const progressPct =
+            expectedScoreCount > 0
+              ? Math.min(
+                  100,
+                  Math.round((actualScoreCount / expectedScoreCount) * 100)
+                )
+              : 0
+
+          return {
+            id: release.id,
+            teamId: release.teamId,
+            teamName: release.team.name,
+            isVisible: release.isVisible,
+            scorerUserId: release.scorerUserId,
+            scorer:
+              release.scorerUser && !batch.isDoubleScored
+                ? {
+                    id: release.scorerUser.id,
+                    email: release.scorerUser.email,
+                    name: release.scorerUser.name,
+                  }
+                : null,
+            members: release.team.members.map((member) => ({
+              id: member.user.id,
+              email: member.user.email,
+              name: member.user.name,
+            })),
+            dimensions:
+              batch.type === 'TRAINING'
+                ? projectDimensions.map((dimension) => ({
+                    id: dimension.id,
+                    label: dimension.label,
+                  }))
+                : release.team.dimensions.map((dimension) => ({
+                    id: dimension.dimension.id,
+                    label: dimension.dimension.label,
+                  })),
+            progressPct,
+            actualScoreCount,
+            expectedScoreCount,
+          }
+        })
+      )
+
+      const visibleTeamReleases = teamReleases.filter((release) => release.isVisible)
+      const totalExpectedScoreCount = visibleTeamReleases.reduce(
+        (sum, release) => sum + release.expectedScoreCount,
+        0
+      )
+      const totalActualScoreCount = visibleTeamReleases.reduce(
+        (sum, release) => sum + release.actualScoreCount,
+        0
+      )
+      const progressPct =
+        totalExpectedScoreCount > 0
+          ? Math.min(
+              100,
+              Math.round((totalActualScoreCount / totalExpectedScoreCount) * 100)
+            )
+          : 0
 
       return {
         id: batch.id,
@@ -111,20 +230,29 @@ export async function GET(
         conjunctionId: batch.conjunctionId,
         status: batch.status,
         type: batch.type,
+        isDoubleScored: batch.isDoubleScored,
         size: batch.size,
         sortOrder: batch.sortOrder,
         adjudicatorId: batch.adjudicatorId,
         isHidden: batch.isHidden,
         createdAt: batch.createdAt,
         itemCount: batch._count.feedbackItems,
-        scoredItemCount,
+        progressPct,
         discrepancyCount,
         reconciledCount,
         irrPct,
-        evaluators: batch.assignments.map((a) => ({
-          ...a.user,
-          scoringRole: a.scoringRole,
+        ranges: batch.ranges.map((range) => ({
+          id: range.id,
+          startFeedbackId: range.startFeedbackId,
+          endFeedbackId: range.endFeedbackId,
+          itemCount: range.itemCount,
         })),
+        evaluators: batch.assignments.map((assignment) => ({
+          ...assignment.user,
+          scoringRole: assignment.scoringRole,
+          isVisible: assignment.teamRelease?.isVisible ?? !batch.isHidden,
+        })),
+        teamReleases,
       }
     })
   )
@@ -132,17 +260,7 @@ export async function GET(
   return NextResponse.json(batchesWithStats)
 }
 
-// POST /api/projects/[projectId]/batches — create a batch
-// Body: {
-//   name?: string,              — auto-generated if omitted
-//   activityId?: string,        — filter items by activity
-//   conjunctionId?: string,     — filter items by conjunction
-//   batchSize?: number,         — how many items (default 250, or "all" for all matching)
-//   type?: "REGULAR" | "TRAINING",
-//   randomize?: boolean,        — shuffle AI/HUMAN order (default true)
-//   itemIds?: string[],         — explicit item selection (for training batches)
-//   mode?: "auto",              — legacy: auto-group by activity+conjunction
-// }
+// POST /api/projects/[projectId]/batches — create a batch from feedback-id ranges
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ projectId: string }> }
@@ -158,7 +276,6 @@ export async function POST(
   const { projectId } = await params
   const body = await request.json()
 
-  // Legacy auto mode — kept for backward compat
   if (body.mode === 'auto') {
     return handleAutoMode(projectId, body)
   }
@@ -166,116 +283,317 @@ export async function POST(
   const {
     activityId,
     conjunctionId,
-    batchSize = 250,
     type = 'REGULAR',
     randomize = true,
-    itemIds,
-    importId,
-  } = body
+    visibleToTeams = false,
+    itemIds: trainingItemIds,
+    ranges = [],
+  } = body as {
+    activityId?: string
+    conjunctionId?: string
+    type?: 'REGULAR' | 'TRAINING'
+    randomize?: boolean
+    visibleToTeams?: boolean
+    itemIds?: string[]
+    ranges?: BatchRangeInput[]
+  }
 
-  let name = body.name as string | undefined
+  const isDoubleScored =
+    type === 'REGULAR' ? Boolean(body.isDoubleScored) : false
 
-  // For training batches with explicit item IDs
-  if (type === 'TRAINING' && Array.isArray(itemIds) && itemIds.length > 0) {
+  if (
+    type === 'TRAINING' &&
+    Array.isArray(trainingItemIds) &&
+    trainingItemIds.length > 0
+  ) {
     const sortOrder = await prisma.batch.count({ where: { projectId } })
-    const batchName = name || `Training Batch`
+    const batchName = `Training Batch ${sortOrder + 1}`
 
     const batch = await prisma.batch.create({
       data: {
         projectId,
         name: batchName,
         type: 'TRAINING',
-        size: itemIds.length,
+        status: visibleToTeams ? 'SCORING' : 'DRAFT',
+        size: trainingItemIds.length,
         sortOrder,
       },
     })
 
     await prisma.feedbackItem.updateMany({
-      where: { id: { in: itemIds }, projectId },
+      where: { id: { in: trainingItemIds }, projectId },
       data: { batchId: batch.id },
     })
+
+    const teams = await prisma.evaluatorTeam.findMany({
+      where: { projectId },
+      include: {
+        members: {
+          include: {
+            user: {
+              select: {
+                email: true,
+              },
+            },
+          },
+          orderBy: { user: { email: 'asc' } },
+        },
+      },
+      orderBy: { name: 'asc' },
+    })
+
+    for (const team of teams) {
+      const release = await prisma.teamBatchRelease.create({
+        data: {
+          batchId: batch.id,
+          teamId: team.id,
+          isVisible: visibleToTeams,
+          scorerUserId: null,
+        },
+      })
+      await syncBatchAssignmentsForRelease(release.id)
+    }
 
     if (randomize) {
       await randomizeDisplayOrder(batch.id)
     }
 
     return NextResponse.json(
-      { id: batch.id, name: batchName, itemCount: itemIds.length, type },
+      { id: batch.id, name: batchName, itemCount: trainingItemIds.length, type },
       { status: 201 }
     )
   }
 
-  // Standard batch creation: filter → take N → assign to batch
-  const whereClause: Record<string, unknown> = {
-    projectId,
-    batchId: null, // Only unbatched items
-  }
-  if (activityId) whereClause.activityId = activityId
-  if (conjunctionId) whereClause.conjunctionId = conjunctionId
-  if (importId) whereClause.importId = importId
-
-  // Count available items
-  const availableCount = await prisma.feedbackItem.count({
-    where: whereClause,
-  })
-
-  if (availableCount === 0) {
+  if (!Array.isArray(ranges) || ranges.length === 0) {
     return NextResponse.json(
-      { error: 'No matching unbatched items found' },
+      { error: 'At least one feedback ID range is required' },
       { status: 400 }
     )
   }
 
-  const takeCount =
-    batchSize === 'all' ? availableCount : Math.min(batchSize, availableCount)
-
-  // Fetch items to put in this batch
-  const items = await prisma.feedbackItem.findMany({
-    where: whereClause,
-    take: takeCount,
-    orderBy: { createdAt: 'asc' },
-    select: { id: true },
+  const allProjectItems = await prisma.feedbackItem.findMany({
+    where: { projectId },
+    select: {
+      id: true,
+      feedbackId: true,
+      batchId: true,
+      activityId: true,
+      conjunctionId: true,
+    },
   })
 
-  // Auto-generate batch name if not provided
-  if (!name) {
-    const existingCount = await prisma.batch.count({
-      where: { projectId, activityId: activityId || undefined },
-    })
-    const actPart = activityId ? `Activity ${activityId}` : 'All Activities'
-    const conjPart = conjunctionId ? ` / ${conjunctionId}` : ''
-    name = `${actPart}${conjPart} / Batch ${existingCount + 1}`
+  if (allProjectItems.length === 0) {
+    return NextResponse.json(
+      { error: 'No feedback items found for this project' },
+      { status: 400 }
+    )
   }
 
+  const sortedItems = [...allProjectItems].sort((a, b) =>
+    compareFeedbackIds(a.feedbackId, b.feedbackId)
+  )
+  const indexByFeedbackId = new Map(
+    sortedItems.map((item, index) => [item.feedbackId, index])
+  )
+
+  let normalizedRanges: {
+    startFeedbackId: string
+    endFeedbackId: string
+    startIndex: number
+    endIndex: number
+    sortOrder: number
+  }[]
+  try {
+    normalizedRanges = ranges.map((range, index) => {
+      const startFeedbackId = range.startFeedbackId?.trim()
+      const endFeedbackId = range.endFeedbackId?.trim()
+
+      if (!startFeedbackId || !endFeedbackId) {
+        throw new Error(
+          `Range ${index + 1} is missing a start or end feedback ID`
+        )
+      }
+
+      const startIndex = indexByFeedbackId.get(startFeedbackId)
+      const endIndex = indexByFeedbackId.get(endFeedbackId)
+
+      if (startIndex === undefined || endIndex === undefined) {
+        throw new Error(
+          `Range ${index + 1} references a feedback ID that does not exist in this project`
+        )
+      }
+
+      if (startIndex > endIndex) {
+        throw new Error(
+          `Range ${index + 1} must start before or at its ending feedback ID`
+        )
+      }
+
+      return {
+        startFeedbackId,
+        endFeedbackId,
+        startIndex,
+        endIndex,
+        sortOrder: index,
+      }
+    })
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Invalid batch ranges' },
+      { status: 400 }
+    )
+  }
+
+  normalizedRanges.sort((a, b) => a.startIndex - b.startIndex)
+  for (let i = 1; i < normalizedRanges.length; i++) {
+    const previous = normalizedRanges[i - 1]
+    const current = normalizedRanges[i]
+    if (current.startIndex <= previous.endIndex) {
+      return NextResponse.json(
+        { error: 'Feedback ID ranges cannot overlap within the same batch' },
+        { status: 400 }
+      )
+    }
+  }
+
+  const selectedItemIds = new Set<string>()
+  let rangesToCreate: {
+    startFeedbackId: string
+    endFeedbackId: string
+    itemCount: number
+    sortOrder: number
+  }[]
+  try {
+    rangesToCreate = normalizedRanges.map((range) => {
+      const slice = sortedItems.slice(range.startIndex, range.endIndex + 1)
+      const blockedItem = slice.find((item) => item.batchId !== null)
+
+      if (blockedItem) {
+        throw new Error(
+          `Feedback ID range ${range.startFeedbackId}–${range.endFeedbackId} includes already-batched item ${blockedItem.feedbackId}`
+        )
+      }
+
+      for (const item of slice) {
+        selectedItemIds.add(item.id)
+      }
+
+      return {
+        startFeedbackId: range.startFeedbackId,
+        endFeedbackId: range.endFeedbackId,
+        itemCount: slice.length,
+        sortOrder: range.sortOrder,
+      }
+    })
+  } catch (error) {
+    return NextResponse.json(
+      {
+        error:
+          error instanceof Error ? error.message : 'Invalid feedback ID range',
+      },
+      { status: 400 }
+    )
+  }
+
+  const selectedItems = sortedItems.filter((item) => selectedItemIds.has(item.id))
+  if (selectedItems.length === 0) {
+    return NextResponse.json(
+      { error: 'No feedback items were selected for this batch' },
+      { status: 400 }
+    )
+  }
+
+  const inferredActivityId = inferSharedValue(selectedItems, 'activityId')
+  const inferredConjunctionId = inferSharedValue(selectedItems, 'conjunctionId')
+
   const sortOrder = await prisma.batch.count({ where: { projectId } })
+  const name = `Batch ${sortOrder + 1}`
 
   const batch = await prisma.batch.create({
     data: {
       projectId,
       name,
-      activityId: activityId || null,
-      conjunctionId: conjunctionId || null,
-      type: type === 'TRAINING' ? 'TRAINING' : 'REGULAR',
-      size: takeCount,
+      activityId: activityId || inferredActivityId,
+      conjunctionId: conjunctionId || inferredConjunctionId,
+      type,
+      isDoubleScored,
+      status: visibleToTeams ? 'SCORING' : 'DRAFT',
+      size: selectedItems.length,
       sortOrder,
+      ranges: {
+        create: rangesToCreate,
+      },
     },
   })
 
-  // Assign items to batch
   await prisma.feedbackItem.updateMany({
-    where: { id: { in: items.map((i) => i.id) } },
+    where: { id: { in: Array.from(selectedItemIds) } },
     data: { batchId: batch.id },
   })
 
-  // Randomize display order within batch (shuffles AI/HUMAN)
+  if (type === 'REGULAR' || type === 'TRAINING') {
+    const teams = await prisma.evaluatorTeam.findMany({
+      where: { projectId },
+      include: {
+        members: {
+          include: {
+            user: {
+              select: {
+                email: true,
+              },
+            },
+          },
+          orderBy: { user: { email: 'asc' } },
+        },
+      },
+      orderBy: { name: 'asc' },
+    })
+
+    const releaseIds: string[] = []
+    for (const team of teams) {
+      const release = await prisma.teamBatchRelease.create({
+        data: {
+          batchId: batch.id,
+          teamId: team.id,
+          isVisible: visibleToTeams,
+          scorerUserId:
+            type === 'TRAINING'
+              ? null
+              : isDoubleScored
+                ? null
+                : (team.members[0]?.userId ?? null),
+        },
+      })
+      releaseIds.push(release.id)
+    }
+
+    for (const releaseId of releaseIds) {
+      await syncBatchAssignmentsForRelease(releaseId)
+    }
+  }
+
   if (randomize) {
     await randomizeDisplayOrder(batch.id)
   }
 
   return NextResponse.json(
-    { id: batch.id, name, itemCount: items.length, type },
+    {
+      id: batch.id,
+      name,
+      itemCount: selectedItems.length,
+      type,
+      isDoubleScored,
+    },
     { status: 201 }
   )
+}
+
+function inferSharedValue<T extends 'activityId' | 'conjunctionId'>(
+  items: IndexedItem[],
+  key: T
+) {
+  const values = new Set(items.map((item) => item[key]).filter(Boolean))
+  return values.size === 1 ? (Array.from(values)[0] ?? null) : null
 }
 
 // Shuffle displayOrder for items in a batch (Fisher-Yates via DB)
@@ -285,20 +603,21 @@ async function randomizeDisplayOrder(batchId: string) {
     select: { id: true },
   })
 
-  // Fisher-Yates shuffle using CSPRNG (blinding-critical randomness)
   const { randomInt } = await import('crypto')
-  const indices = items.map((_, i) => i)
-  for (let i = indices.length - 1; i > 0; i--) {
-    const j = randomInt(i + 1)
-    ;[indices[i], indices[j]] = [indices[j], indices[i]]
+  const indices = items.map((_, index) => index)
+  for (let index = indices.length - 1; index > 0; index--) {
+    const swapIndex = randomInt(index + 1)
+    ;[indices[index], indices[swapIndex]] = [
+      indices[swapIndex],
+      indices[index],
+    ]
   }
 
-  // Update display orders in parallel
   await Promise.all(
-    items.map((item, i) =>
+    items.map((item, index) =>
       prisma.feedbackItem.update({
         where: { id: item.id },
-        data: { displayOrder: indices[i] },
+        data: { displayOrder: indices[index] },
       })
     )
   )
@@ -337,8 +656,8 @@ async function handleAutoMode(
     const [activityId, conjunctionId] = key.split('::')
     const chunks: (typeof groupItems)[] = []
 
-    for (let i = 0; i < groupItems.length; i += batchSize) {
-      chunks.push(groupItems.slice(i, i + batchSize))
+    for (let index = 0; index < groupItems.length; index += batchSize) {
+      chunks.push(groupItems.slice(index, index + batchSize))
     }
 
     for (let chunkIdx = 0; chunkIdx < chunks.length; chunkIdx++) {

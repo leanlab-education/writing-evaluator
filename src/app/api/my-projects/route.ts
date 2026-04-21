@@ -45,7 +45,11 @@ export async function GET() {
   // Get batch assignments for this user — skip admin-hidden batches
   // so the Double-before-Independent release workflow works.
   const batchAssignments = await prisma.batchAssignment.findMany({
-    where: { userId: session.user.id, batch: { isHidden: false } },
+    where: {
+      userId: session.user.id,
+      OR: [{ teamReleaseId: null }, { teamRelease: { isVisible: true } }],
+      batch: { isHidden: false },
+    },
     include: {
       batch: {
         include: {

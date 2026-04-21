@@ -20,15 +20,29 @@ export default async function EvaluatePage({
   // that the batch hasn't been hidden by an admin.
   if (session.user.role !== 'ADMIN') {
     if (batchId) {
-      // Check the specific batch is open for scoring AND not hidden
       const batch = await prisma.batch.findUnique({
         where: { id: batchId },
-        select: { status: true, projectId: true, isHidden: true },
+        select: {
+          status: true,
+          projectId: true,
+          isHidden: true,
+          assignments: {
+            where: {
+              userId: session.user.id,
+              OR: [
+                { teamReleaseId: null },
+                { teamRelease: { isVisible: true } },
+              ],
+            },
+            select: { id: true },
+          },
+        },
       })
       if (
         !batch ||
         batch.projectId !== projectId ||
         batch.isHidden ||
+        batch.assignments.length === 0 ||
         (batch.status !== 'SCORING' && batch.status !== 'RECONCILING')
       ) {
         redirect('/')
@@ -37,6 +51,7 @@ export default async function EvaluatePage({
       const scorableBatch = await prisma.batchAssignment.findFirst({
         where: {
           userId: session.user.id,
+          OR: [{ teamReleaseId: null }, { teamRelease: { isVisible: true } }],
           batch: {
             projectId,
             isHidden: false,

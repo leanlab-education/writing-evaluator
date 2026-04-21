@@ -25,6 +25,7 @@ model User {
   batchAssignments      BatchAssignment[]
   teamMemberships       EvaluatorTeamMember[]
   adjudicatedBatches    Batch[]        @relation("BatchAdjudicator")
+  teamBatchReleases     TeamBatchRelease[] @relation("TeamBatchReleaseScorer")
   escalationsCreated    Escalation[]   @relation("EscalationEscalatedBy")
   escalationsResolved   Escalation[]   @relation("EscalationResolvedBy")
 }
@@ -190,6 +191,7 @@ model Batch {
   activityId     String?                      // Quill activity this batch covers
   conjunctionId  String?                      // "But" or "Because"
   type           BatchType   @default(REGULAR)
+  isDoubleScored Boolean     @default(false)
   status         BatchStatus @default(DRAFT)
   size           Int         @default(250)    // Target batch size
   isAssigned     Boolean     @default(false)  // Locked after first evaluator assignment
@@ -201,7 +203,9 @@ model Batch {
   project       Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
   adjudicator   User?             @relation("BatchAdjudicator", fields: [adjudicatorId], references: [id], onDelete: SetNull)
   feedbackItems FeedbackItem[]
+  ranges        BatchRange[]
   assignments   BatchAssignment[]
+  teamReleases  TeamBatchRelease[]
   escalations   Escalation[]
 }
 
@@ -221,11 +225,13 @@ model BatchAssignment {
   id          String      @id @default(cuid())
   batchId     String
   userId      String
+  teamReleaseId String?
   scoringRole ScoringRole @default(PRIMARY)
   createdAt   DateTime    @default(now())
 
-  batch Batch @relation(fields: [batchId], references: [id], onDelete: Cascade)
-  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  batch       Batch             @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  teamRelease TeamBatchRelease? @relation(fields: [teamReleaseId], references: [id], onDelete: SetNull)
 
   @@unique([batchId, userId])
 }
@@ -233,6 +239,35 @@ model BatchAssignment {
 enum ScoringRole {
   PRIMARY // First scorer — this is "their" batch
   DOUBLE  // Double-scoring for IRR — scoring partner's items
+}
+
+model BatchRange {
+  id              String   @id @default(cuid())
+  batchId         String
+  startFeedbackId String
+  endFeedbackId   String
+  itemCount       Int
+  sortOrder       Int      @default(0)
+  createdAt       DateTime @default(now())
+
+  batch Batch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+}
+
+model TeamBatchRelease {
+  id           String   @id @default(cuid())
+  batchId      String
+  teamId       String
+  scorerUserId String?
+  isVisible    Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  batch       Batch             @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  team        EvaluatorTeam     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  scorerUser  User?             @relation("TeamBatchReleaseScorer", fields: [scorerUserId], references: [id], onDelete: SetNull)
+  assignments BatchAssignment[]
+
+  @@unique([batchId, teamId])
 }
 
 // ============================================
@@ -248,6 +283,7 @@ model EvaluatorTeam {
   project    Project                  @relation(fields: [projectId], references: [id], onDelete: Cascade)
   members    EvaluatorTeamMember[]
   dimensions EvaluatorTeamDimension[]
+  releases   TeamBatchRelease[]
 
   @@unique([projectId, name])
 }

@@ -110,12 +110,27 @@ export async function maybeAutoTransitionToReconciling(
     where: { id: batchId },
     select: {
       status: true,
-      assignments: { select: { userId: true } },
+      assignments: {
+        select: {
+          userId: true,
+          teamRelease: {
+            select: { isVisible: true },
+          },
+        },
+      },
+      teamReleases: {
+        select: { isVisible: true },
+      },
     },
   })
   if (!batch) return false
   if (batch.status !== 'SCORING') return false
-  if (batch.assignments.length < 2) return false
+  if (batch.teamReleases.some((release) => !release.isVisible)) return false
+
+  const visibleAssignments = batch.assignments.filter(
+    (assignment) => assignment.teamRelease?.isVisible ?? true
+  )
+  if (visibleAssignments.length < 2) return false
 
   const done = await isBatchFullyScored(batchId)
   if (!done) return false

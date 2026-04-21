@@ -1,7 +1,7 @@
 'use client'
 
 import { useRouter } from 'next/navigation'
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import {
   Card,
   CardContent,
@@ -103,8 +103,42 @@ interface BatchRow {
   size: number
   sortOrder: number
   itemCount: number
-  scoredItemCount: number
-  evaluators: { id: string; email: string; name: string | null; scoringRole?: string }[]
+  progressPct: number
+  type: string
+  isDoubleScored: boolean
+  adjudicatorId?: string | null
+  isHidden?: boolean
+  discrepancyCount?: number
+  reconciledCount?: number
+  irrPct?: number | null
+  ranges: {
+    id: string
+    startFeedbackId: string
+    endFeedbackId: string
+    itemCount: number
+  }[]
+  teamReleases: {
+    id: string
+    teamId: string
+    teamName: string
+    isVisible: boolean
+    scorerUserId: string | null
+    scorer: { id: string; email: string; name: string | null } | null
+    members: { id: string; email: string; name: string | null }[]
+    dimensions: { id: string; label: string }[]
+    progressPct: number
+  }[]
+  evaluators: {
+    id: string
+    email: string
+    name: string | null
+    scoringRole?: string
+    isVisible?: boolean
+  }[]
+}
+
+interface BatchRefreshOptions {
+  silent?: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -116,6 +150,7 @@ export function ProjectDetailClient({
   initialEvaluators,
   initialScoredItemCount,
   initialFeedbackItemsData,
+  initialActiveTab,
 }: {
   initialProject: Project
   initialEvaluators: EvaluatorRow[]
@@ -126,14 +161,15 @@ export function ProjectDetailClient({
     unassignedTotal: number
     filterOptions: { activityIds: string[]; conjunctionIds: string[] }
   }
+  initialActiveTab: string
 }) {
   const router = useRouter()
   const projectId = initialProject.id
 
   const [project, setProject] = useState<Project>(initialProject)
   const [evaluators, setEvaluators] = useState<EvaluatorRow[]>(initialEvaluators)
-  const [scoredItemCount, setScoredItemCount] = useState(initialScoredItemCount)
-  const [activeTab, setActiveTab] = useState('overview')
+  const [scoredItemCount] = useState(initialScoredItemCount)
+  const [activeTab, setActiveTab] = useState(initialActiveTab)
 
   // Add evaluator dialog
   const [addDialogOpen, setAddDialogOpen] = useState(false)
@@ -184,8 +220,10 @@ export function ProjectDetailClient({
     }
   }, [projectId])
 
-  const fetchBatches = useCallback(async () => {
-    setBatchesLoading(true)
+  const fetchBatches = useCallback(async (options?: BatchRefreshOptions) => {
+    if (!options?.silent) {
+      setBatchesLoading(true)
+    }
     try {
       const res = await fetch(`/api/projects/${projectId}/batches`)
       if (res.ok) {
@@ -195,21 +233,17 @@ export function ProjectDetailClient({
     } catch (err) {
       console.error('Failed to fetch batches:', err)
     } finally {
-      setBatchesLoading(false)
+      if (!options?.silent) {
+        setBatchesLoading(false)
+      }
     }
   }, [projectId])
 
-  const fetchScoredCount = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/projects/${projectId}/stats`)
-      if (res.ok) {
-        const data = await res.json()
-        setScoredItemCount(data.scoredItemCount ?? 0)
-      }
-    } catch (err) {
-      console.error('Failed to fetch stats:', err)
+  useEffect(() => {
+    if (activeTab === 'batches') {
+      fetchBatches()
     }
-  }, [projectId])
+  }, [activeTab, fetchBatches])
 
   // ---------------------------------------------------------------------------
   // Actions

@@ -28,6 +28,21 @@ export async function GET(request: NextRequest) {
     if (!membership) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
+
+    if (batchId) {
+      const assignment = await prisma.batchAssignment.findFirst({
+        where: {
+          batchId,
+          userId: session.user.id,
+          OR: [{ teamReleaseId: null }, { teamRelease: { isVisible: true } }],
+        },
+        select: { id: true },
+      })
+
+      if (!assignment) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      }
+    }
   }
 
   // Base query: feedback items without feedbackSource (blinded)

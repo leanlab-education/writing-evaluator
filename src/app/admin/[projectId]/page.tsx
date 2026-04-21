@@ -5,14 +5,17 @@ import { ProjectDetailClient } from '@/components/project-detail-client'
 
 export default async function ProjectDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ projectId: string }>
+  searchParams: Promise<{ tab?: string }>
 }) {
   const session = await auth()
   if (!session?.user) redirect('/login')
   if (session.user.role !== 'ADMIN') redirect('/')
 
   const { projectId } = await params
+  const { tab } = await searchParams
 
   // Fetch all data in parallel
   const [project, evaluatorsRaw, scoredItems, feedbackItemsResult, feedbackItemsCount, unassignedCount, allItemsForFilters] = await Promise.all([
@@ -133,6 +136,7 @@ export default async function ProjectDetailPage({
       initialEvaluators={evaluators}
       initialScoredItemCount={scoredItems.length}
       initialFeedbackItemsData={initialFeedbackItemsData}
+      initialActiveTab={tab === 'batches' ? 'batches' : 'overview'}
     />
   )
 }

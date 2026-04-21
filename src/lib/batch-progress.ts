@@ -21,12 +21,37 @@ export async function isBatchFullyScored(batchId: string): Promise<boolean> {
       projectId: true,
       type: true,
       feedbackItems: { select: { id: true } },
-      assignments: { select: { userId: true } },
+      assignments: {
+        select: {
+          userId: true,
+          teamRelease: {
+            select: { isVisible: true },
+          },
+        },
+      },
+      teamReleases: {
+        select: {
+          isVisible: true,
+        },
+      },
     },
   })
   if (!batch) return false
-  if (batch.assignments.length === 0) return false
   if (batch.feedbackItems.length === 0) return false
+
+  if (
+    batch.type === 'REGULAR' &&
+    batch.teamReleases.some((release) => !release.isVisible)
+  ) {
+    return false
+  }
+
+  const activeAssignments =
+    batch.type === 'TRAINING'
+      ? batch.assignments
+      : batch.assignments.filter((assignment) => assignment.teamRelease?.isVisible)
+
+  if (activeAssignments.length === 0) return false
 
   const itemIds = batch.feedbackItems.map((f) => f.id)
   const allDimensions = await prisma.rubricDimension.findMany({
@@ -39,7 +64,7 @@ export async function isBatchFullyScored(batchId: string): Promise<boolean> {
   // Team memberships for this project — reused across evaluators
   const teamMemberships = await prisma.evaluatorTeamMember.findMany({
     where: {
-      userId: { in: batch.assignments.map((a) => a.userId) },
+      userId: { in: activeAssignments.map((a) => a.userId) },
       team: { projectId: batch.projectId },
     },
     include: {
@@ -54,7 +79,7 @@ export async function isBatchFullyScored(batchId: string): Promise<boolean> {
     )
   }
 
-  for (const { userId } of batch.assignments) {
+  for (const { userId } of activeAssignments) {
     const expectedDimIds =
       batch.type === 'TRAINING'
         ? allDimIds

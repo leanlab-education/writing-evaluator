@@ -1,35 +1,30 @@
 'use client'
 
-import { useState, useCallback, useEffect } from 'react'
-import { Button } from '@/components/ui/button'
+import Link from 'next/link'
+import { useEffect, useMemo, useState } from 'react'
+import { Button, buttonVariants } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from '@/components/ui/dialog'
-import { ChevronRight, Loader2, Plus, Shuffle } from 'lucide-react'
+import { ChevronRight, Loader2, Plus } from 'lucide-react'
 import { batchStatusColors, batchStatusLabels } from '@/lib/status-colors'
+import { cn } from '@/lib/utils'
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-interface UnbatchedGroup {
-  activityId: string | null
-  conjunctionId: string | null
-  count: number
+interface TeamReleaseRow {
+  id: string
+  teamId: string
+  teamName: string
+  isVisible: boolean
+  scorerUserId: string | null
+  scorer: { id: string; email: string; name: string | null } | null
+  members: { id: string; email: string; name: string | null }[]
+  dimensions: { id: string; label: string }[]
+  progressPct: number
 }
 
-interface BatchEvaluator {
+interface BatchRangeRow {
   id: string
-  email: string
-  name: string | null
-  scoringRole?: string
+  startFeedbackId: string
+  endFeedbackId: string
+  itemCount: number
 }
 
 interface BatchRow {
@@ -38,17 +33,17 @@ interface BatchRow {
   activityId: string | null
   conjunctionId: string | null
   status: string
-  size: number
-  sortOrder: number
   itemCount: number
-  scoredItemCount: number
+  progressPct: number
   discrepancyCount?: number
   reconciledCount?: number
   irrPct?: number | null
-  evaluators: BatchEvaluator[]
-  type?: string
+  type: string
+  isDoubleScored: boolean
   adjudicatorId?: string | null
   isHidden?: boolean
+  ranges: BatchRangeRow[]
+  teamReleases: TeamReleaseRow[]
 }
 
 interface EvaluatorOption {
@@ -60,13 +55,9 @@ interface Props {
   projectId: string
   evaluators: EvaluatorOption[]
   batches: BatchRow[]
-  onBatchesChange: () => void
+  onBatchesChange: (options?: { silent?: boolean }) => void | Promise<void>
   batchesLoading: boolean
 }
-
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
 
 export function BatchCreator({
   projectId,
@@ -75,284 +66,66 @@ export function BatchCreator({
   onBatchesChange,
   batchesLoading,
 }: Props) {
-  // Create batch dialog
-  const [createOpen, setCreateOpen] = useState(false)
-  const [creating, setCreating] = useState(false)
-  const [createError, setCreateError] = useState('')
-
-  // Create form state
-  const [selectedActivity, setSelectedActivity] = useState<string>('')
-  const [selectedConjunction, setSelectedConjunction] = useState<string>('')
-  const [selectedImport, setSelectedImport] = useState<string>('')
-  const [batchSize, setBatchSize] = useState('250')
-  const [batchName, setBatchName] = useState('')
-  const [randomize, setRandomize] = useState(true)
-  const [batchType, setBatchType] = useState<'REGULAR' | 'TRAINING'>(
-    'REGULAR'
-  )
-
-  // Import history (for the "From import" filter in the create dialog)
-  const [imports, setImports] = useState<
-    {
-      id: string
-      filename: string
-      itemCount: number
-      skippedCount: number
-      unbatchedRemaining: number
-      createdAt: string
-    }[]
-  >([])
-
-  // Unbatched stats
-  const [unbatchedStats, setUnbatchedStats] = useState<{
-    totalUnbatched: number
-    groups: UnbatchedGroup[]
-  } | null>(null)
-  const [statsLoading, setStatsLoading] = useState(false)
-
-  // Batch list filters
+  const [localBatches, setLocalBatches] = useState<BatchRow[]>(batches)
   const [filterActivity, setFilterActivity] = useState('')
   const [filterConjunction, setFilterConjunction] = useState('')
-
-  // Batch assignment — per-batch selected evaluator (avoids dropdown state
-  // leaking across tiles when multiple batches are open).
-  const [assigningBatch, setAssigningBatch] = useState<string | null>(null)
-  const [selectedEvaluatorByBatch, setSelectedEvaluatorByBatch] = useState<
-    Record<string, string>
-  >({})
-
-  // Expanded batch rows
   const [expandedBatches, setExpandedBatches] = useState<Set<string>>(new Set())
-  const toggleExpanded = (batchId: string) => {
-    setExpandedBatches((prev) => {
-      const next = new Set(prev)
+
+  useEffect(() => {
+    setLocalBatches(batches)
+  }, [batches])
+
+  const batchActivityIds = useMemo(
+    () => [...new Set(localBatches.map((batch) => batch.activityId).filter(Boolean) as string[])].sort(),
+    [localBatches]
+  )
+  const batchConjunctionIds = useMemo(
+    () =>
+      [
+        ...new Set(
+          localBatches
+            .filter((batch) => (filterActivity ? batch.activityId === filterActivity : true))
+            .map((batch) => batch.conjunctionId)
+            .filter(Boolean) as string[]
+        ),
+      ].sort(),
+    [localBatches, filterActivity]
+  )
+
+  const filteredBatches = localBatches.filter((batch) => {
+    if (filterActivity && batch.activityId !== filterActivity) return false
+    if (filterConjunction && batch.conjunctionId !== filterConjunction) return false
+    return true
+  })
+
+  function toggleExpanded(batchId: string) {
+    setExpandedBatches((previous) => {
+      const next = new Set(previous)
       if (next.has(batchId)) next.delete(batchId)
       else next.add(batchId)
       return next
     })
   }
 
-  // ---------------------------------------------------------------------------
-  // Data fetching
-  // ---------------------------------------------------------------------------
-
-  const fetchUnbatchedStats = useCallback(async () => {
-    setStatsLoading(true)
-    try {
-      const res = await fetch(
-        `/api/projects/${projectId}/unbatched-stats`
-      )
-      if (res.ok) {
-        const data = await res.json()
-        setUnbatchedStats(data)
-      }
-    } catch (err) {
-      console.error('Failed to fetch unbatched stats:', err)
-    } finally {
-      setStatsLoading(false)
-    }
-  }, [projectId])
-
-  useEffect(() => {
-    fetchUnbatchedStats()
-  }, [fetchUnbatchedStats])
-
-  // Fetch import history so the create dialog can scope new batches to a
-  // specific upload (rolling-upload workflow per Amber's 4/9 meeting).
-  useEffect(() => {
-    async function fetchImports() {
-      try {
-        const res = await fetch(`/api/projects/${projectId}/imports`)
-        if (res.ok) {
-          const data = await res.json()
-          setImports(data)
-        }
-      } catch (err) {
-        console.error('Failed to fetch imports:', err)
-      }
-    }
-    fetchImports()
-  }, [projectId])
-
-  // ---------------------------------------------------------------------------
-  // Derived data
-  // ---------------------------------------------------------------------------
-
-  // Unique activity IDs from unbatched items
-  const activityIds = [
-    ...new Set(
-      (unbatchedStats?.groups || [])
-        .map((g) => g.activityId)
-        .filter(Boolean) as string[]
-    ),
-  ].sort()
-
-  // Conjunction IDs filtered by selected activity
-  const conjunctionIds = [
-    ...new Set(
-      (unbatchedStats?.groups || [])
-        .filter((g) =>
-          selectedActivity ? g.activityId === selectedActivity : true
-        )
-        .map((g) => g.conjunctionId)
-        .filter(Boolean) as string[]
-    ),
-  ].sort()
-
-  // Unique activity/conjunction IDs from existing batches (for list filters)
-  const batchActivityIds = [
-    ...new Set(
-      batches.map((b) => b.activityId).filter(Boolean) as string[]
-    ),
-  ].sort()
-  const batchConjunctionIds = [
-    ...new Set(
-      batches
-        .filter((b) => (filterActivity ? b.activityId === filterActivity : true))
-        .map((b) => b.conjunctionId)
-        .filter(Boolean) as string[]
-    ),
-  ].sort()
-
-  // Filtered batch list
-  const filteredBatches = batches.filter((b) => {
-    if (filterActivity && b.activityId !== filterActivity) return false
-    if (filterConjunction && b.conjunctionId !== filterConjunction) return false
-    return true
-  })
-
-  // Count of available items matching current filters
-  const matchingCount =
-    unbatchedStats?.groups
-      .filter((g) => {
-        if (selectedActivity && g.activityId !== selectedActivity) return false
-        if (selectedConjunction && g.conjunctionId !== selectedConjunction)
-          return false
-        return true
-      })
-      .reduce((sum, g) => sum + g.count, 0) ?? 0
-
-  // ---------------------------------------------------------------------------
-  // Actions
-  // ---------------------------------------------------------------------------
-
-  async function handleCreateBatch(e: React.FormEvent) {
-    e.preventDefault()
-    setCreateError('')
-    setCreating(true)
-
-    try {
-      const res = await fetch(`/api/projects/${projectId}/batches`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: batchName.trim() || undefined,
-          activityId: selectedActivity || undefined,
-          conjunctionId: selectedConjunction || undefined,
-          importId: selectedImport || undefined,
-          batchSize:
-            batchSize === 'all' ? 'all' : parseInt(batchSize) || 250,
-          type: batchType,
-          randomize,
-        }),
-      })
-
-      if (res.ok) {
-        setBatchName('')
-        setSelectedActivity('')
-        setSelectedConjunction('')
-        setSelectedImport('')
-        setBatchSize('250')
-        setRandomize(true)
-        setBatchType('REGULAR')
-        setCreateOpen(false)
-        onBatchesChange()
-        fetchUnbatchedStats()
-      } else {
-        const err = await res.json()
-        setCreateError(err.error || 'Failed to create batch')
-      }
-    } catch (err) {
-      console.error('Failed to create batch:', err)
-      setCreateError('Something went wrong')
-    } finally {
-      setCreating(false)
-    }
-  }
-
-  async function handleAssignEvaluator(batchId: string, userId: string) {
-    // Auto-derive scoringRole from existing assignee count:
-    //   0 existing -> PRIMARY (first scorer)
-    //   1 existing -> DOUBLE  (second scorer = double-scored batch)
-    // The dropdown-based role picker was confusing (per 2026-04-09 meeting);
-    // this keeps the mental model simple: add one person = independent,
-    // add a second = double-scored.
-    const batch = batches.find((b) => b.id === batchId)
-    const existingCount = batch?.evaluators.length ?? 0
-    const scoringRole: 'PRIMARY' | 'DOUBLE' =
-      existingCount === 0 ? 'PRIMARY' : 'DOUBLE'
-
-    setAssigningBatch(batchId)
-    try {
-      const res = await fetch(
-        `/api/projects/${projectId}/batches/${batchId}/assign`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            userIds: [userId],
-            scoringRole,
-          }),
-        }
-      )
-      if (res.ok) {
-        onBatchesChange()
-        setSelectedEvaluatorByBatch((prev) => {
-          const next = { ...prev }
-          delete next[batchId]
-          return next
-        })
-      }
-    } catch (err) {
-      console.error('Failed to assign evaluator:', err)
-    } finally {
-      setAssigningBatch(null)
-    }
-  }
-
-  async function handleRemoveEvaluator(batchId: string, userId: string) {
-    setAssigningBatch(batchId)
-    try {
-      await fetch(
-        `/api/projects/${projectId}/batches/${batchId}/assign?userId=${userId}`,
-        { method: 'DELETE' }
-      )
-      onBatchesChange()
-    } catch (err) {
-      console.error('Failed to remove evaluator:', err)
-    } finally {
-      setAssigningBatch(null)
-    }
-  }
-
   async function handleBatchStatusChange(batchId: string, newStatus: string) {
-    if (newStatus === 'COMPLETE' && !confirm('This will prevent evaluators from making further changes to this batch. Continue?')) {
+    if (
+      newStatus === 'COMPLETE' &&
+      !confirm('This will prevent annotators from making further changes to this batch. Continue?')
+    ) {
       return
     }
+
     try {
-      const res = await fetch(
-        `/api/projects/${projectId}/batches/${batchId}`,
-        {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: newStatus }),
-        }
-      )
-      if (res.ok) {
-        onBatchesChange()
+      const response = await fetch(`/api/projects/${projectId}/batches/${batchId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus }),
+      })
+      if (response.ok) {
+        await onBatchesChange({ silent: true })
       }
-    } catch (err) {
-      console.error('Failed to update batch status:', err)
+    } catch (error) {
+      console.error('Failed to update batch status:', error)
     }
   }
 
@@ -361,395 +134,179 @@ export function BatchCreator({
     adjudicatorId: string | null
   ) {
     try {
-      const res = await fetch(
-        `/api/projects/${projectId}/batches/${batchId}`,
-        {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ adjudicatorId }),
-        }
-      )
-      if (res.ok) {
-        onBatchesChange()
+      const response = await fetch(`/api/projects/${projectId}/batches/${batchId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ adjudicatorId }),
+      })
+      if (response.ok) {
+        await onBatchesChange({ silent: true })
       }
-    } catch (err) {
-      console.error('Failed to update adjudicator:', err)
+    } catch (error) {
+      console.error('Failed to update adjudicator:', error)
     }
   }
 
   async function handleDeleteBatch(batchId: string) {
     if (!confirm('Delete this batch? Items will return to the unbatched pool.')) return
     try {
-      const res = await fetch(
-        `/api/projects/${projectId}/batches/${batchId}`,
-        { method: 'DELETE' }
-      )
-      if (res.ok) {
-        onBatchesChange()
-        fetchUnbatchedStats()
+      const response = await fetch(`/api/projects/${projectId}/batches/${batchId}`, {
+        method: 'DELETE',
+      })
+      if (response.ok) {
+        await onBatchesChange()
       }
-    } catch (err) {
-      console.error('Failed to delete batch:', err)
+    } catch (error) {
+      console.error('Failed to delete batch:', error)
     }
   }
 
-  async function handleVisibilityChange(batchId: string, isHidden: boolean) {
+  async function handleUpdateTeamRelease(
+    batchId: string,
+    releaseId: string,
+    patch: { isVisible?: boolean; scorerUserId?: string | null }
+  ) {
+    const previousBatches = localBatches
+    setLocalBatches((current) =>
+      current.map((batch) =>
+        batch.id !== batchId
+          ? batch
+          : {
+              ...batch,
+              teamReleases: batch.teamReleases.map((release) =>
+                release.id !== releaseId ? release : { ...release, ...patch }
+              ),
+            }
+      )
+    )
+
     try {
-      const res = await fetch(
-        `/api/projects/${projectId}/batches/${batchId}`,
+      const response = await fetch(
+        `/api/projects/${projectId}/batches/${batchId}/releases/${releaseId}`,
         {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ isHidden }),
+          body: JSON.stringify(patch),
         }
       )
-      if (res.ok) {
-        onBatchesChange()
+      if (response.ok) {
+        await onBatchesChange({ silent: true })
+      } else {
+        setLocalBatches(previousBatches)
       }
-    } catch (err) {
-      console.error('Failed to update visibility:', err)
+    } catch (error) {
+      setLocalBatches(previousBatches)
+      console.error('Failed to update team release:', error)
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Render
-  // ---------------------------------------------------------------------------
-
   return (
-    <div className="space-y-4">
+      <div className="space-y-3">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-lg font-semibold">Batches</h2>
           <p className="text-sm text-muted-foreground">
-            Create batches by filtering items, then assign to annotators.
-            {unbatchedStats && (
-              <span className="ml-1 font-medium">
-                {unbatchedStats.totalUnbatched} unbatched items remaining.
-              </span>
-            )}
+            Create batches from feedback ID ranges, then release them to teams on
+            your schedule.
           </p>
         </div>
-        <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-          <DialogTrigger render={<Button />}>
-            <Plus className="mr-2 h-4 w-4" />
-            Create Batch
-          </DialogTrigger>
-          <DialogContent className="max-w-md">
-            <DialogHeader>
-              <DialogTitle>Create Batch</DialogTitle>
-            </DialogHeader>
-            <form onSubmit={handleCreateBatch} className="space-y-4">
-              {/* Batch type */}
-              <div className="space-y-2">
-                <Label>Batch Type</Label>
-                <div className="flex gap-2">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant={batchType === 'REGULAR' ? 'default' : 'outline'}
-                    onClick={() => setBatchType('REGULAR')}
-                  >
-                    Regular
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant={
-                      batchType === 'TRAINING' ? 'default' : 'outline'
-                    }
-                    onClick={() => setBatchType('TRAINING')}
-                  >
-                    Training
-                  </Button>
-                </div>
-                {batchType === 'REGULAR' ? (
-                  <p className="text-xs text-muted-foreground">
-                    Teams are assigned specific criteria. Each annotator scores only their team&apos;s criteria for these items.
-                  </p>
-                ) : (
-                  <p className="text-xs text-muted-foreground">
-                    All annotators score every rubric criterion. Use for onboarding before teams are assigned.
-                  </p>
-                )}
-                <p className="text-xs text-muted-foreground/60">
-                  Tip: you can create multiple batches with different types from the same filters.
-                </p>
-              </div>
-
-              {/* Scope to a specific import (rolling upload workflow) */}
-              {imports.length > 0 && (
-                <div className="space-y-2">
-                  <Label htmlFor="import-filter">
-                    From upload{' '}
-                    <span className="text-muted-foreground">(optional)</span>
-                  </Label>
-                  <select
-                    id="import-filter"
-                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors"
-                    value={selectedImport}
-                    onChange={(e) => setSelectedImport(e.target.value)}
-                  >
-                    <option value="">All unbatched items</option>
-                    {imports
-                      .filter((imp) => imp.unbatchedRemaining > 0)
-                      .map((imp) => (
-                        <option key={imp.id} value={imp.id}>
-                          {imp.filename} · {imp.unbatchedRemaining} unbatched ·{' '}
-                          {new Date(imp.createdAt).toLocaleDateString()}
-                        </option>
-                      ))}
-                  </select>
-                  <p className="text-xs text-muted-foreground">
-                    Pick a single upload if you only want to batch items from
-                    that file.
-                  </p>
-                </div>
-              )}
-
-              {/* Activity filter */}
-              <div className="space-y-2">
-                <Label htmlFor="activity-filter">Activity ID</Label>
-                <select
-                  id="activity-filter"
-                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors"
-                  value={selectedActivity}
-                  onChange={(e) => {
-                    setSelectedActivity(e.target.value)
-                    setSelectedConjunction('')
-                  }}
-                >
-                  <option value="">All activities</option>
-                  {activityIds.map((id) => (
-                    <option key={id} value={id}>
-                      Activity {id}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Conjunction filter */}
-              <div className="space-y-2">
-                <Label htmlFor="conjunction-filter">Conjunction ID</Label>
-                <select
-                  id="conjunction-filter"
-                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors"
-                  value={selectedConjunction}
-                  onChange={(e) => setSelectedConjunction(e.target.value)}
-                >
-                  <option value="">All conjunctions</option>
-                  {conjunctionIds.map((id) => (
-                    <option key={id} value={id}>
-                      {id}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Available items */}
-              <div className="rounded-md bg-muted px-3 py-2 text-sm">
-                <span className="font-medium">{matchingCount}</span> items
-                available matching these filters
-              </div>
-
-              {/* Batch size */}
-              <div className="space-y-2">
-                <Label htmlFor="batch-size">Batch Size</Label>
-                <div className="flex gap-2">
-                  <Input
-                    id="batch-size"
-                    type="number"
-                    value={batchSize === 'all' ? '' : batchSize}
-                    onChange={(e) => setBatchSize(e.target.value)}
-                    placeholder="250"
-                    min={1}
-                    className="w-28"
-                    disabled={batchSize === 'all'}
-                  />
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant={batchSize === 'all' ? 'default' : 'outline'}
-                    onClick={() =>
-                      setBatchSize(batchSize === 'all' ? '250' : 'all')
-                    }
-                  >
-                    All ({matchingCount})
-                  </Button>
-                </div>
-              </div>
-
-              {/* Randomize */}
-              <label className="flex cursor-pointer items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={randomize}
-                  onChange={(e) => setRandomize(e.target.checked)}
-                  className="rounded border-input"
-                />
-                <Shuffle className="h-3.5 w-3.5 text-muted-foreground" />
-                Randomize feedback source order (AI/HUMAN mixed)
-              </label>
-
-              {/* Custom name */}
-              <div className="space-y-2">
-                <Label htmlFor="batch-name">
-                  Batch Name{' '}
-                  <span className="text-muted-foreground">(optional)</span>
-                </Label>
-                <Input
-                  id="batch-name"
-                  value={batchName}
-                  onChange={(e) => setBatchName(e.target.value)}
-                  placeholder="Auto-generated if left blank"
-                />
-              </div>
-
-              {createError && (
-                <p className="text-sm text-destructive">{createError}</p>
-              )}
-
-              <div className="flex justify-end gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => {
-                    setCreateOpen(false)
-                    setCreateError('')
-                  }}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="submit"
-                  disabled={creating || matchingCount === 0}
-                >
-                  {creating ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Creating...
-                    </>
-                  ) : (
-                    `Create Batch (${batchSize === 'all' ? matchingCount : Math.min(parseInt(batchSize) || 250, matchingCount)} items)`
-                  )}
-                </Button>
-              </div>
-            </form>
-          </DialogContent>
-        </Dialog>
+        <Link
+          href={`/admin/${projectId}/batches/new`}
+          className={cn(buttonVariants({ variant: 'default' }))}
+        >
+          <Plus className="mr-2 h-4 w-4" />
+          Create Batch
+        </Link>
       </div>
 
-      {/* Batch list filters */}
-      {batches.length > 0 && (
+      {localBatches.length > 0 && (
         <div className="flex items-center gap-3">
           <span className="text-sm font-medium text-muted-foreground">Filter:</span>
           <select
-            className="flex h-8 rounded-md border border-input bg-background px-2 py-1 text-sm shadow-sm transition-colors"
+            className="flex h-8 rounded-md border border-input bg-background px-2 py-1 text-sm shadow-sm transition-all duration-200"
             value={filterActivity}
-            onChange={(e) => {
-              setFilterActivity(e.target.value)
+            onChange={(event) => {
+              setFilterActivity(event.target.value)
               setFilterConjunction('')
             }}
           >
             <option value="">All activities</option>
-            {batchActivityIds.map((id) => (
-              <option key={id} value={id}>Activity {id}</option>
+            {batchActivityIds.map((activityId) => (
+              <option key={activityId} value={activityId}>
+                Activity {activityId}
+              </option>
             ))}
           </select>
           <select
-            className="flex h-8 rounded-md border border-input bg-background px-2 py-1 text-sm shadow-sm transition-colors"
+            className="flex h-8 rounded-md border border-input bg-background px-2 py-1 text-sm shadow-sm transition-all duration-200"
             value={filterConjunction}
-            onChange={(e) => setFilterConjunction(e.target.value)}
+            onChange={(event) => setFilterConjunction(event.target.value)}
           >
             <option value="">All conjunctions</option>
-            {batchConjunctionIds.map((id) => (
-              <option key={id} value={id}>{id}</option>
+            {batchConjunctionIds.map((conjunctionId) => (
+              <option key={conjunctionId} value={conjunctionId}>
+                {conjunctionId}
+              </option>
             ))}
           </select>
           {(filterActivity || filterConjunction) && (
             <span className="text-xs text-muted-foreground">
-              {filteredBatches.length} of {batches.length} batches
+              {filteredBatches.length} of {localBatches.length} batches
             </span>
           )}
         </div>
       )}
 
-      {/* Batch list */}
       {batchesLoading ? (
         <div className="flex items-center justify-center py-8">
           <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
         </div>
-      ) : batches.length === 0 ? (
+      ) : localBatches.length === 0 ? (
         <div className="py-8 text-center text-sm text-muted-foreground">
-          No batches created yet. Import data first, then create batches to
-          assign items to evaluators.
+          No batches created yet. Use the full-screen builder to create your first
+          batch from feedback ID ranges.
         </div>
       ) : (
         <div className="rounded-md border border-border">
-          {filteredBatches.map((batch, idx) => {
-            const pct =
-              batch.itemCount > 0
-                ? Math.round(
-                    (batch.scoredItemCount / batch.itemCount) * 100
-                  )
-                : 0
-            const isTraining = batch.type === 'TRAINING'
-            const evaluatorCount = batch.evaluators.length
-            const assignmentLabel = isTraining
-              ? 'Training'
-              : evaluatorCount >= 2
-                ? 'Double'
-                : evaluatorCount === 1
-                  ? 'Single'
-                  : 'Unassigned'
-            const assignmentBadgeClass = isTraining
-              ? 'bg-status-active-bg text-status-active-text'
-              : evaluatorCount >= 2
-                ? 'bg-score-high-bg text-score-high-text'
-                : evaluatorCount === 1
-                  ? 'bg-muted text-muted-foreground'
-                  : 'bg-muted/50 text-muted-foreground/80'
-            const maxEvaluators = isTraining
-              ? evaluators.length
-              : 2
-            const canAddMore = evaluatorCount < maxEvaluators
-            const selectedEvaluator =
-              selectedEvaluatorByBatch[batch.id] ?? ''
+          {filteredBatches.map((batch, index) => {
             const isExpanded = expandedBatches.has(batch.id)
+            const visibleReleaseCount = batch.teamReleases.filter(
+              (release) => release.isVisible
+            ).length
+            const assignmentLabel =
+              batch.type === 'TRAINING'
+                ? 'Training'
+                : batch.isDoubleScored
+                  ? 'Double'
+                  : 'Single'
+            const assignmentBadgeClass =
+              batch.type === 'TRAINING'
+                ? 'bg-status-active-bg text-status-active-text'
+                : batch.isDoubleScored
+                  ? 'bg-score-high-bg text-score-high-text'
+                  : 'bg-muted text-muted-foreground'
 
             return (
-              <div
-                key={batch.id}
-                className={idx > 0 ? 'border-t border-border' : ''}
-              >
-                {/* Compact row */}
+              <div key={batch.id} className={index > 0 ? 'border-t border-border' : ''}>
                 <div
                   className="flex cursor-pointer items-center gap-2 px-3 py-2 transition-colors hover:bg-muted/50"
                   onClick={() => toggleExpanded(batch.id)}
                 >
                   <ChevronRight
-                    className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`}
+                    className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform duration-200 ${
+                      isExpanded ? 'rotate-90' : ''
+                    }`}
                   />
-                  <span className="min-w-0 truncate text-sm font-medium">
-                    {batch.name}
-                  </span>
-                  <Badge
-                    className={`${batchStatusColors[batch.status] || ''} shrink-0 text-[10px]`}
-                  >
+                  <span className="min-w-0 truncate text-sm font-medium">{batch.name}</span>
+                  <Badge className={`${batchStatusColors[batch.status] || ''} shrink-0 text-[10px]`}>
                     {batchStatusLabels[batch.status] || batch.status}
                   </Badge>
-                  <Badge
-                    className={`${assignmentBadgeClass} shrink-0 text-[10px]`}
-                  >
+                  <Badge className={`${assignmentBadgeClass} shrink-0 text-[10px]`}>
                     {assignmentLabel}
                   </Badge>
-                  {batch.isHidden && (
-                    <Badge
-                      variant="outline"
-                      className="shrink-0 border-muted-foreground/30 text-[10px] text-muted-foreground"
-                    >
-                      Hidden
-                    </Badge>
-                  )}
+                  <Badge variant="outline" className="shrink-0 text-[10px]">
+                    {visibleReleaseCount}/{batch.teamReleases.length} visible teams
+                  </Badge>
                   {batch.irrPct != null && (
                     <Badge
                       className={`shrink-0 text-[10px] ${
@@ -767,43 +324,42 @@ export function BatchCreator({
                     <div className="h-1.5 w-16 overflow-hidden rounded-full bg-muted">
                       <div
                         className="h-full rounded-full bg-primary transition-all duration-300"
-                        style={{ width: `${pct}%` }}
+                        style={{ width: `${batch.progressPct}%` }}
                       />
                     </div>
-                    <span className="w-20 text-right text-xs tabular-nums text-muted-foreground">
-                      {batch.status === 'RECONCILING' &&
-                      batch.discrepancyCount != null
-                        ? `${batch.reconciledCount ?? 0}/${batch.discrepancyCount} rec.`
-                        : `${batch.scoredItemCount}/${batch.itemCount}`}
+                    <span className="w-14 text-right text-xs tabular-nums text-muted-foreground">
+                      {batch.progressPct}%
                     </span>
-                    {batch.evaluators.length > 0 && (
-                      <span className="text-xs text-muted-foreground">
-                        {batch.evaluators
-                          .map((ev) => ev.name?.split(' ')[0] || ev.email.split('@')[0])
-                          .join(', ')}
-                      </span>
-                    )}
                   </div>
                 </div>
 
-                {/* Expanded details */}
                 {isExpanded && (
-                  <div className="space-y-3 border-t border-border/50 bg-muted/20 px-3 py-3 pl-8">
-                    {/* Meta */}
-                    <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                  <div className="space-y-2.5 border-t border-border/50 bg-muted/20 px-3 py-2.5 pl-8">
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                       <span>{batch.itemCount} items</span>
                       {batch.activityId && <span>Activity {batch.activityId}</span>}
                       {batch.conjunctionId && <span>{batch.conjunctionId}</span>}
+                      <span className="basis-full">
+                        Ranges:{' '}
+                        {batch.ranges
+                          .map(
+                            (range) =>
+                              `${range.startFeedbackId}-${range.endFeedbackId} (${range.itemCount})`
+                          )
+                          .join(', ')}
+                      </span>
+                      <span>
+                        Teams visible: {visibleReleaseCount}/{batch.teamReleases.length}
+                      </span>
                       <div className="ml-auto flex items-center gap-2">
-                        <span className="text-muted-foreground">Status:</span>
+                        <span>Status:</span>
                         <select
-                          className="flex h-7 rounded-md border border-input bg-background px-2 py-0.5 text-xs shadow-sm transition-colors"
+                          className="flex h-7 rounded-md border border-input bg-background px-2 py-0.5 text-xs shadow-sm transition-all duration-200"
                           value={batch.status}
-                          onChange={(e) => {
-                            e.stopPropagation()
-                            handleBatchStatusChange(batch.id, e.target.value)
-                          }}
-                          onClick={(e) => e.stopPropagation()}
+                          onChange={(event) =>
+                            handleBatchStatusChange(batch.id, event.target.value)
+                          }
+                          onClick={(event) => event.stopPropagation()}
                         >
                           <option value="DRAFT">Draft</option>
                           <option value="SCORING">Scoring</option>
@@ -813,149 +369,101 @@ export function BatchCreator({
                       </div>
                     </div>
 
-                    {/* Evaluators */}
-                    <div className="flex flex-wrap items-center gap-2">
-                      {batch.evaluators.length === 0 ? (
-                        <span className="text-xs text-muted-foreground/60">
-                          No annotators assigned
-                        </span>
-                      ) : (
-                        batch.evaluators.map((ev) => (
-                          <Badge
-                            key={ev.id}
-                            variant="secondary"
-                            className="gap-1"
-                          >
-                            {ev.name || ev.email}
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                handleRemoveEvaluator(batch.id, ev.id)
-                              }}
-                              className="ml-1 text-muted-foreground hover:text-destructive"
-                              aria-label={`Remove ${ev.name || ev.email}`}
-                            >
-                              &times;
-                            </button>
-                          </Badge>
-                        ))
-                      )}
+                    <div className="space-y-2">
+                          {batch.teamReleases.length === 0 ? (
+                            <div className="rounded-xl border border-dashed border-border px-3 py-3 text-sm text-muted-foreground">
+                              No team assignments found for this batch. New batches
+                              assign every team automatically.
+                            </div>
+                          ) : (
+                            batch.teamReleases.map((release) => (
+                              <div
+                                key={release.id}
+                                className="rounded-xl border border-border bg-background/70 px-3 py-2"
+                              >
+                              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                                <div className="text-sm font-medium">{release.teamName}</div>
+                                <Badge variant="outline" className="text-[10px]">
+                                  {release.progressPct}%
+                                </Badge>
+                                <span className="text-xs text-muted-foreground">
+                                  {batch.type === 'TRAINING'
+                                    ? 'Criteria: All criteria'
+                                    : `Criteria: ${release.dimensions.map((dimension) => dimension.label).join(', ')}`}
+                                </span>
+                              </div>
+                              <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                                <span className="text-muted-foreground">
+                                  Members:{' '}
+                                  {release.members
+                                    .map((member) => member.name || member.email)
+                                    .join(', ')}
+                                </span>
+                                {batch.type === 'REGULAR' && !batch.isDoubleScored && (
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-muted-foreground">Scorer:</span>
+                                    <select
+                                      className="flex h-6 rounded-md border border-input bg-background px-2 py-0.5 text-xs shadow-sm transition-all duration-200"
+                                      value={release.scorerUserId || ''}
+                                      onChange={(event) =>
+                                        handleUpdateTeamRelease(batch.id, release.id, {
+                                          scorerUserId: event.target.value || null,
+                                        })
+                                      }
+                                    >
+                                      {release.members.map((member) => (
+                                        <option key={member.id} value={member.id}>
+                                          {member.name || member.email}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                )}
+                                <label className="flex cursor-pointer items-center gap-1.5">
+                                  <input
+                                    type="checkbox"
+                                    checked={release.isVisible}
+                                    onChange={(event) =>
+                                      handleUpdateTeamRelease(batch.id, release.id, {
+                                        isVisible: event.target.checked,
+                                      })
+                                    }
+                                    className="size-3.5 rounded border-input"
+                                  />
+                                  <span className="text-muted-foreground">Visible now</span>
+                                </label>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
 
-                      {canAddMore && evaluators.length > 0 && (
-                        <div className="ml-auto flex items-center gap-1">
-                          <select
-                            className="flex h-7 rounded-md border border-input bg-background px-2 py-0.5 text-xs shadow-sm transition-colors"
-                            value={selectedEvaluator}
-                            onClick={(e) => e.stopPropagation()}
-                            onChange={(e) =>
-                              setSelectedEvaluatorByBatch((prev) => ({
-                                ...prev,
-                                [batch.id]: e.target.value,
-                              }))
-                            }
-                          >
-                            <option value="">
-                              {evaluatorCount === 0
-                                ? 'Assign annotator…'
-                                : isTraining
-                                  ? 'Add another…'
-                                  : 'Add for double-scoring…'}
-                            </option>
-                            {evaluators
-                              .filter(
-                                (ev) =>
-                                  !batch.evaluators.some(
-                                    (be) => be.id === ev.user.id
-                                  )
-                              )
-                              .map((ev) => (
-                                <option key={ev.user.id} value={ev.user.id}>
-                                  {ev.user.name || ev.user.email}
-                                </option>
-                              ))}
-                          </select>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-7 px-2 text-xs"
-                            disabled={
-                              !selectedEvaluator ||
-                              assigningBatch === batch.id
-                            }
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              if (selectedEvaluator) {
-                                handleAssignEvaluator(
-                                  batch.id,
-                                  selectedEvaluator
-                                )
-                              }
-                            }}
-                          >
-                            {assigningBatch === batch.id ? (
-                              <Loader2 className="h-3 w-3 animate-spin" />
-                            ) : (
-                              'Add'
-                            )}
-                          </Button>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Adjudicator + visibility */}
-                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
-                      {evaluatorCount >= 2 && !isTraining && (
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
+                      {batch.type === 'REGULAR' && batch.isDoubleScored && (
                         <div className="flex items-center gap-2">
-                          <span className="text-muted-foreground">
-                            Adjudicator:
-                          </span>
+                          <span className="text-muted-foreground">Adjudicator:</span>
                           <select
-                            className="flex h-7 rounded-md border border-input bg-background px-2 py-0.5 text-xs shadow-sm transition-colors"
+                            className="flex h-6 rounded-md border border-input bg-background px-2 py-0.5 text-xs shadow-sm transition-all duration-200"
                             value={batch.adjudicatorId ?? ''}
-                            onClick={(e) => e.stopPropagation()}
-                            onChange={(e) =>
-                              handleAdjudicatorChange(
-                                batch.id,
-                                e.target.value || null
-                              )
+                            onChange={(event) =>
+                              handleAdjudicatorChange(batch.id, event.target.value || null)
                             }
                           >
                             <option value="">— None —</option>
-                            {evaluators.map((ev) => (
-                              <option key={ev.user.id} value={ev.user.id}>
-                                {ev.user.name || ev.user.email}
+                            {evaluators.map((evaluator) => (
+                              <option key={evaluator.user.id} value={evaluator.user.id}>
+                                {evaluator.user.name || evaluator.user.email}
                               </option>
                             ))}
                           </select>
-                          {!batch.adjudicatorId && (
-                            <span className="text-muted-foreground/60">
-                              (needed before the pair can escalate)
-                            </span>
-                          )}
                         </div>
                       )}
-                      <label className="flex cursor-pointer items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
-                        <input
-                          type="checkbox"
-                          checked={!!batch.isHidden}
-                          onChange={(e) =>
-                            handleVisibilityChange(batch.id, e.target.checked)
-                          }
-                          className="size-3.5 rounded border-input"
-                        />
-                        <span className="text-muted-foreground">
-                          Hidden from annotators
-                        </span>
-                      </label>
                       {batch.status === 'DRAFT' && (
                         <Button
                           size="sm"
                           variant="ghost"
                           className="ml-auto h-6 px-2 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            handleDeleteBatch(batch.id)
-                          }}
+                          onClick={() => handleDeleteBatch(batch.id)}
                         >
                           Delete
                         </Button>

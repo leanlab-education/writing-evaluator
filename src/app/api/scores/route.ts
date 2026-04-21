@@ -88,14 +88,27 @@ export async function POST(request: Request) {
 
   // Verify batch is in a scoreable state and not hidden from this user
   if (feedbackItem.batchId) {
-    const batch = await prisma.batch.findUnique({
-      where: { id: feedbackItem.batchId },
-      select: { status: true, isHidden: true },
-    })
+    const [batch, assignment] = await Promise.all([
+      prisma.batch.findUnique({
+        where: { id: feedbackItem.batchId },
+        select: { status: true, isHidden: true },
+      }),
+      prisma.batchAssignment.findFirst({
+        where: {
+          batchId: feedbackItem.batchId,
+          userId: session.user.id,
+          OR: [{ teamReleaseId: null }, { teamRelease: { isVisible: true } }],
+        },
+        select: { id: true },
+      }),
+    ])
     if (!batch || !['SCORING', 'RECONCILING'].includes(batch.status)) {
       return NextResponse.json({ error: 'Scoring is not open for this batch' }, { status: 403 })
     }
     if (batch.isHidden && session.user.role !== 'ADMIN') {
+      return NextResponse.json({ error: 'Scoring is not open for this batch' }, { status: 403 })
+    }
+    if (!assignment && session.user.role !== 'ADMIN') {
       return NextResponse.json({ error: 'Scoring is not open for this batch' }, { status: 403 })
     }
   }
@@ -200,14 +213,27 @@ export async function PUT(request: Request) {
 
   // Verify batch is in a scoreable state and not hidden from this user
   if (feedbackItem.batchId) {
-    const batch = await prisma.batch.findUnique({
-      where: { id: feedbackItem.batchId },
-      select: { status: true, isHidden: true },
-    })
+    const [batch, assignment] = await Promise.all([
+      prisma.batch.findUnique({
+        where: { id: feedbackItem.batchId },
+        select: { status: true, isHidden: true },
+      }),
+      prisma.batchAssignment.findFirst({
+        where: {
+          batchId: feedbackItem.batchId,
+          userId: session.user.id,
+          OR: [{ teamReleaseId: null }, { teamRelease: { isVisible: true } }],
+        },
+        select: { id: true },
+      }),
+    ])
     if (!batch || !['SCORING', 'RECONCILING'].includes(batch.status)) {
       return NextResponse.json({ error: 'Scoring is not open for this batch' }, { status: 403 })
     }
     if (batch.isHidden && session.user.role !== 'ADMIN') {
+      return NextResponse.json({ error: 'Scoring is not open for this batch' }, { status: 403 })
+    }
+    if (!assignment && session.user.role !== 'ADMIN') {
       return NextResponse.json({ error: 'Scoring is not open for this batch' }, { status: 403 })
     }
   }
