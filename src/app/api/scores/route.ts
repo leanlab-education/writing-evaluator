@@ -1,6 +1,6 @@
 import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/db'
-import { maybeAutoTransitionToReconciling } from '@/lib/reconciliation'
+import { maybeAdvanceReleaseAfterScore } from '@/lib/reconciliation'
 import { NextRequest, NextResponse } from 'next/server'
 
 export async function GET(request: NextRequest) {
@@ -87,6 +87,7 @@ export async function POST(request: Request) {
   }
 
   // Verify batch is in a scoreable state and not hidden from this user
+  let releaseId: string | null = null
   if (feedbackItem.batchId) {
     const [batch, assignment] = await Promise.all([
       prisma.batch.findUnique({
@@ -99,11 +100,20 @@ export async function POST(request: Request) {
           userId: session.user.id,
           OR: [{ teamReleaseId: null }, { teamRelease: { isVisible: true } }],
         },
-        select: { id: true },
+        select: {
+          id: true,
+          teamReleaseId: true,
+          teamRelease: {
+            select: {
+              isVisible: true,
+              status: true,
+            },
+          },
+        },
       }),
     ])
-    if (!batch || !['SCORING', 'RECONCILING'].includes(batch.status)) {
-      return NextResponse.json({ error: 'Scoring is not open for this batch' }, { status: 403 })
+    if (!batch) {
+      return NextResponse.json({ error: 'Batch not found' }, { status: 404 })
     }
     if (batch.isHidden && session.user.role !== 'ADMIN') {
       return NextResponse.json({ error: 'Scoring is not open for this batch' }, { status: 403 })
@@ -111,6 +121,16 @@ export async function POST(request: Request) {
     if (!assignment && session.user.role !== 'ADMIN') {
       return NextResponse.json({ error: 'Scoring is not open for this batch' }, { status: 403 })
     }
+    if (
+      assignment?.teamRelease &&
+      (!assignment.teamRelease.isVisible || assignment.teamRelease.status !== 'SCORING')
+    ) {
+      return NextResponse.json({ error: 'Scoring is not open for this release' }, { status: 403 })
+    }
+    if (!assignment?.teamRelease && (!batch || batch.status !== 'SCORING')) {
+      return NextResponse.json({ error: 'Scoring is not open for this batch' }, { status: 403 })
+    }
+    releaseId = assignment?.teamReleaseId ?? null
   }
 
   // Validate each score's dimensionId belongs to this project and value is within scale
@@ -165,14 +185,11 @@ export async function POST(request: Request) {
     return createdScores
   })
 
-  // After a successful save, check whether this batch is now fully scored
-  // by every evaluator. If so, auto-transition SCORING → RECONCILING.
-  // Fire-and-forget: failure here must not break the save response.
-  if (feedbackItem.batchId) {
+  if (releaseId) {
     try {
-      await maybeAutoTransitionToReconciling(feedbackItem.batchId)
+      await maybeAdvanceReleaseAfterScore(releaseId)
     } catch (err) {
-      console.error('Auto-transition check failed:', err)
+      console.error('Release advancement check failed:', err)
     }
   }
 
@@ -212,6 +229,7 @@ export async function PUT(request: Request) {
   }
 
   // Verify batch is in a scoreable state and not hidden from this user
+  let releaseId: string | null = null
   if (feedbackItem.batchId) {
     const [batch, assignment] = await Promise.all([
       prisma.batch.findUnique({
@@ -224,11 +242,20 @@ export async function PUT(request: Request) {
           userId: session.user.id,
           OR: [{ teamReleaseId: null }, { teamRelease: { isVisible: true } }],
         },
-        select: { id: true },
+        select: {
+          id: true,
+          teamReleaseId: true,
+          teamRelease: {
+            select: {
+              isVisible: true,
+              status: true,
+            },
+          },
+        },
       }),
     ])
-    if (!batch || !['SCORING', 'RECONCILING'].includes(batch.status)) {
-      return NextResponse.json({ error: 'Scoring is not open for this batch' }, { status: 403 })
+    if (!batch) {
+      return NextResponse.json({ error: 'Batch not found' }, { status: 404 })
     }
     if (batch.isHidden && session.user.role !== 'ADMIN') {
       return NextResponse.json({ error: 'Scoring is not open for this batch' }, { status: 403 })
@@ -236,6 +263,16 @@ export async function PUT(request: Request) {
     if (!assignment && session.user.role !== 'ADMIN') {
       return NextResponse.json({ error: 'Scoring is not open for this batch' }, { status: 403 })
     }
+    if (
+      assignment?.teamRelease &&
+      (!assignment.teamRelease.isVisible || assignment.teamRelease.status !== 'SCORING')
+    ) {
+      return NextResponse.json({ error: 'Scoring is not open for this release' }, { status: 403 })
+    }
+    if (!assignment?.teamRelease && (!batch || batch.status !== 'SCORING')) {
+      return NextResponse.json({ error: 'Scoring is not open for this batch' }, { status: 403 })
+    }
+    releaseId = assignment?.teamReleaseId ?? null
   }
 
   // Validate score dimensions and values if scores are provided
@@ -320,13 +357,11 @@ export async function PUT(request: Request) {
     })
   }
 
-  // After a successful auto-save, check whether this batch is now fully
-  // scored by every evaluator. If so, auto-transition SCORING → RECONCILING.
-  if (feedbackItem.batchId) {
+  if (releaseId) {
     try {
-      await maybeAutoTransitionToReconciling(feedbackItem.batchId)
+      await maybeAdvanceReleaseAfterScore(releaseId)
     } catch (err) {
-      console.error('Auto-transition check failed:', err)
+      console.error('Release advancement check failed:', err)
     }
   }
 

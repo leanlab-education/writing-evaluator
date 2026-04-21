@@ -1,7 +1,7 @@
 import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/db'
 import { compareFeedbackIds } from '@/lib/feedback-id'
-import { computeBatchIRR } from '@/lib/irr'
+import { computeBatchIRRSummary } from '@/lib/irr'
 import {
   getExpectedReleaseUserIds,
   syncBatchAssignmentsForRelease,
@@ -100,16 +100,53 @@ export async function GET(
 
   const batchesWithStats = await Promise.all(
     batches.map(async (batch) => {
-      let irrPct: number | null = null
+      let irrSummary:
+        | {
+            applicableTeamCount: number
+            computedTeamCount: number
+            readyTeamCount: number
+            averageAgreementPct: number | null
+            lowestAgreementPct: number | null
+          }
+        | null = null
+      let teamIrrByReleaseId = new Map<
+        string,
+        {
+          isApplicable: boolean
+          isReady: boolean
+          agreementPct: number | null
+          agreedPairs: number
+          totalPairs: number
+        }
+      >()
       if (
-        batch.assignments.length === 2 &&
-        batch.type !== 'TRAINING' &&
+        (batch.type === 'TRAINING' || batch.isDoubleScored) &&
         (batch.status === 'SCORING' ||
           batch.status === 'RECONCILING' ||
           batch.status === 'COMPLETE')
       ) {
-        const irr = await computeBatchIRR(batch.id)
-        irrPct = irr?.agreementPct ?? null
+        const irr = await computeBatchIRRSummary(batch.id)
+        irrSummary = irr
+          ? {
+              applicableTeamCount: irr.applicableTeamCount,
+              computedTeamCount: irr.computedTeamCount,
+              readyTeamCount: irr.readyTeamCount,
+              averageAgreementPct: irr.averageAgreementPct,
+              lowestAgreementPct: irr.lowestAgreementPct,
+            }
+          : null
+        teamIrrByReleaseId = new Map(
+          irr?.teams.map((team) => [
+            team.releaseId,
+            {
+              isApplicable: team.isApplicable,
+              isReady: team.isReady,
+              agreementPct: team.agreementPct,
+              agreedPairs: team.agreedPairs,
+              totalPairs: team.totalPairs,
+            },
+          ]) ?? []
+        )
       }
 
       let discrepancyCount: number | undefined
@@ -175,6 +212,7 @@ export async function GET(
             teamId: release.teamId,
             teamName: release.team.name,
             isVisible: release.isVisible,
+            status: release.status,
             scorerUserId: release.scorerUserId,
             scorer:
               release.scorerUser && !batch.isDoubleScored
@@ -202,6 +240,7 @@ export async function GET(
             progressPct,
             actualScoreCount,
             expectedScoreCount,
+            irr: teamIrrByReleaseId.get(release.id) ?? null,
           }
         })
       )
@@ -240,7 +279,7 @@ export async function GET(
         progressPct,
         discrepancyCount,
         reconciledCount,
-        irrPct,
+        irrSummary,
         ranges: batch.ranges.map((range) => ({
           id: range.id,
           startFeedbackId: range.startFeedbackId,
@@ -556,6 +595,7 @@ export async function POST(
           batchId: batch.id,
           teamId: team.id,
           isVisible: visibleToTeams,
+          status: visibleToTeams ? 'SCORING' : 'DRAFT',
           scorerUserId:
             type === 'TRAINING'
               ? null

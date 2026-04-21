@@ -110,7 +110,13 @@ interface BatchRow {
   isHidden?: boolean
   discrepancyCount?: number
   reconciledCount?: number
-  irrPct?: number | null
+  irrSummary?: {
+    applicableTeamCount: number
+    computedTeamCount: number
+    readyTeamCount: number
+    averageAgreementPct: number | null
+    lowestAgreementPct: number | null
+  } | null
   ranges: {
     id: string
     startFeedbackId: string
@@ -122,11 +128,19 @@ interface BatchRow {
     teamId: string
     teamName: string
     isVisible: boolean
+    status: string
     scorerUserId: string | null
     scorer: { id: string; email: string; name: string | null } | null
     members: { id: string; email: string; name: string | null }[]
     dimensions: { id: string; label: string }[]
     progressPct: number
+    irr?: {
+      isApplicable: boolean
+      isReady: boolean
+      agreementPct: number | null
+      agreedPairs: number
+      totalPairs: number
+    } | null
   }[]
   evaluators: {
     id: string

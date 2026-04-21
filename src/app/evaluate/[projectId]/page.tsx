@@ -23,7 +23,6 @@ export default async function EvaluatePage({
       const batch = await prisma.batch.findUnique({
         where: { id: batchId },
         select: {
-          status: true,
           projectId: true,
           isHidden: true,
           assignments: {
@@ -31,10 +30,15 @@ export default async function EvaluatePage({
               userId: session.user.id,
               OR: [
                 { teamReleaseId: null },
-                { teamRelease: { isVisible: true } },
+                { teamRelease: { isVisible: true, status: 'SCORING' } },
               ],
             },
-            select: { id: true },
+            select: {
+              id: true,
+              teamRelease: {
+                select: { status: true },
+              },
+            },
           },
         },
       })
@@ -42,8 +46,7 @@ export default async function EvaluatePage({
         !batch ||
         batch.projectId !== projectId ||
         batch.isHidden ||
-        batch.assignments.length === 0 ||
-        (batch.status !== 'SCORING' && batch.status !== 'RECONCILING')
+        batch.assignments.length === 0
       ) {
         redirect('/')
       }
@@ -51,11 +54,13 @@ export default async function EvaluatePage({
       const scorableBatch = await prisma.batchAssignment.findFirst({
         where: {
           userId: session.user.id,
-          OR: [{ teamReleaseId: null }, { teamRelease: { isVisible: true } }],
+          OR: [
+            { teamReleaseId: null, batch: { status: 'SCORING' } },
+            { teamRelease: { isVisible: true, status: 'SCORING' } },
+          ],
           batch: {
             projectId,
             isHidden: false,
-            status: { in: ['SCORING', 'RECONCILING'] },
           },
         },
       })

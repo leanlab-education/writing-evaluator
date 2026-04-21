@@ -1,6 +1,9 @@
 import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/db'
-import { syncBatchAssignmentsForRelease } from '@/lib/team-batch-releases'
+import {
+  syncBatchAssignmentsForRelease,
+  syncBatchStatus,
+} from '@/lib/team-batch-releases'
 import { NextResponse } from 'next/server'
 
 export async function POST(
@@ -88,6 +91,7 @@ export async function POST(
       batchId,
       teamId,
       isVisible,
+      status: isVisible ? 'SCORING' : 'DRAFT',
       scorerUserId:
         batch.type === 'TRAINING'
           ? null
@@ -98,13 +102,7 @@ export async function POST(
   })
 
   await syncBatchAssignmentsForRelease(release.id)
-
-  if (isVisible && batch.status === 'DRAFT') {
-    await prisma.batch.update({
-      where: { id: batchId },
-      data: { status: 'SCORING' },
-    })
-  }
+  await syncBatchStatus(batchId)
 
   return NextResponse.json(release, { status: 201 })
 }

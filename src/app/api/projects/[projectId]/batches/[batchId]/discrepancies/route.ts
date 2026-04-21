@@ -1,11 +1,15 @@
 import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/db'
+import {
+  getExpectedReleaseDimensionIds,
+  getReleaseOwnerUserId,
+} from '@/lib/team-batch-releases'
 import { NextRequest, NextResponse } from 'next/server'
 
-// GET /api/projects/[projectId]/batches/[batchId]/discrepancies
-// Returns items with scoring discrepancies between evaluators for reconciliation.
+// GET /api/projects/[projectId]/batches/[batchId]/discrepancies?releaseId=...
+// Returns items with scoring discrepancies for one team release.
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ projectId: string; batchId: string }> }
 ) {
   const session = await auth()
@@ -14,42 +18,110 @@ export async function GET(
   }
 
   const { projectId, batchId } = await params
+  const releaseId = request.nextUrl.searchParams.get('releaseId')
+  if (!releaseId) {
+    return NextResponse.json({ error: 'releaseId is required' }, { status: 400 })
+  }
 
-  // Admin or evaluator assigned to this batch
   if (session.user.role !== 'ADMIN') {
-    const assignment = await prisma.batchAssignment.findUnique({
-      where: { batchId_userId: { batchId, userId: session.user.id } },
+    const assignment = await prisma.batchAssignment.findFirst({
+      where: {
+        batchId,
+        userId: session.user.id,
+        teamReleaseId: releaseId,
+      },
+      select: { id: true },
     })
     if (!assignment) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
   }
 
-  const batch = await prisma.batch.findUnique({
-    where: { id: batchId },
-    select: { status: true, projectId: true, adjudicatorId: true },
+  const release = await prisma.teamBatchRelease.findUnique({
+    where: { id: releaseId },
+    include: {
+      batch: {
+        select: {
+          id: true,
+          projectId: true,
+          adjudicatorId: true,
+          type: true,
+          isDoubleScored: true,
+        },
+      },
+      team: {
+        include: {
+          members: {
+            include: {
+              user: { select: { id: true, name: true, email: true } },
+            },
+            orderBy: { user: { email: 'asc' } },
+          },
+          dimensions: {
+            include: {
+              dimension: {
+                select: {
+                  id: true,
+                  key: true,
+                  label: true,
+                  sortOrder: true,
+                  scaleMin: true,
+                  scaleMax: true,
+                  scoreLabelJson: true,
+                },
+              },
+            },
+            orderBy: { dimension: { sortOrder: 'asc' } },
+          },
+        },
+      },
+    },
   })
 
-  if (!batch || batch.projectId !== projectId) {
-    return NextResponse.json({ error: 'Batch not found' }, { status: 404 })
+  if (
+    !release ||
+    release.batchId !== batchId ||
+    release.batch.projectId !== projectId
+  ) {
+    return NextResponse.json({ error: 'Release not found' }, { status: 404 })
   }
 
-  if (batch.status !== 'RECONCILING') {
+  if (release.status !== 'RECONCILING') {
     return NextResponse.json(
-      { error: 'Batch must be in RECONCILING status' },
+      { error: 'Release must be in RECONCILING status' },
       { status: 400 }
     )
   }
 
-  const hasAdjudicator = batch.adjudicatorId != null
+  const projectDimensionIds =
+    release.batch.type === 'TRAINING'
+      ? (
+          await prisma.rubricDimension.findMany({
+            where: { projectId },
+            select: {
+              id: true,
+              key: true,
+              label: true,
+              sortOrder: true,
+              scaleMin: true,
+              scaleMax: true,
+              scoreLabelJson: true,
+            },
+            orderBy: { sortOrder: 'asc' },
+          })
+        ).map((dimension) => dimension.id)
+      : []
 
-  // Fetch all original scores for this batch. Notes are stored per-Score
-  // row but the scoring UI writes the same notes value to every dimension
-  // row for an (item, user) pair, so we can read notes from any one of a
-  // coder's Score rows for a given item.
+  const dimensionIds = getExpectedReleaseDimensionIds(release, projectDimensionIds)
+  const userIds = release.team.members.map((member) => member.userId)
+  const ownerUserId = getReleaseOwnerUserId(release)
+  const hasAdjudicator = release.batch.adjudicatorId != null
+
   const scores = await prisma.score.findMany({
     where: {
       feedbackItem: { batchId },
+      userId: { in: userIds },
+      dimensionId: { in: dimensionIds },
       isReconciled: false,
     },
     include: {
@@ -78,9 +150,6 @@ export async function GET(
     },
   })
 
-  // Build a lookup: (feedbackItemId, userId) -> notes (first non-null found).
-  // Used to attach each coder's per-item notes to the discrepancy response
-  // so the reconcile UI can show "why I scored this" for both coders.
   const notesByItemUser = new Map<string, string>()
   for (const score of scores) {
     const key = `${score.feedbackItemId}::${score.userId}`
@@ -89,9 +158,8 @@ export async function GET(
     }
   }
 
-  // Open escalations for this batch, keyed by (feedbackItemId, dimensionId)
   const openEscalations = await prisma.escalation.findMany({
-    where: { batchId, resolvedAt: null },
+    where: { batchId, teamReleaseId: releaseId, resolvedAt: null },
     select: {
       id: true,
       feedbackItemId: true,
@@ -116,7 +184,6 @@ export async function GET(
     })
   }
 
-  // Group by (feedbackItemId, dimensionId) to find discrepancies
   const groupMap = new Map<
     string,
     {
@@ -150,7 +217,6 @@ export async function GET(
     })
   }
 
-  // Build per-item response with discrepancies and agreements
   type ItemCoder = {
     userId: string
     name: string | null
@@ -167,7 +233,7 @@ export async function GET(
       activityId: string | null
       conjunctionId: string | null
       displayOrder: number | null
-      coders: ItemCoder[] // both coders who scored this item (for notes display)
+      coders: ItemCoder[]
       discrepancies: {
         dimensionId: string
         dimensionLabel: string
@@ -176,8 +242,20 @@ export async function GET(
         scaleMin: number
         scaleMax: number
         scoreLabelJson: string | null
-        evaluatorA: { userId: string; name: string | null; email: string; value: number; scoreId: string }
-        evaluatorB: { userId: string; name: string | null; email: string; value: number; scoreId: string }
+        evaluatorA: {
+          userId: string
+          name: string | null
+          email: string
+          value: number
+          scoreId: string
+        }
+        evaluatorB: {
+          userId: string
+          name: string | null
+          email: string
+          value: number
+          scoreId: string
+        }
         escalation: {
           id: string
           escalatedByName: string | null
@@ -193,6 +271,9 @@ export async function GET(
   >()
 
   for (const [, group] of groupMap) {
+    if (group.evaluators.length !== 2) continue
+    if (group.evaluators[0].userId === group.evaluators[1].userId) continue
+
     const fid = group.feedbackItem.id
     if (!itemMap.has(fid)) {
       itemMap.set(fid, {
@@ -209,10 +290,8 @@ export async function GET(
     }
 
     const item = itemMap.get(fid)!
-
-    // Record each coder once per item with their notes
     for (const ev of group.evaluators) {
-      if (!item.coders.some((c) => c.userId === ev.userId)) {
+      if (!item.coders.some((coder) => coder.userId === ev.userId)) {
         item.coders.push({
           userId: ev.userId,
           name: ev.name,
@@ -222,74 +301,71 @@ export async function GET(
       }
     }
 
-    const evals = group.evaluators
-
-    if (evals.length === 2) {
-      if (evals[0].value !== evals[1].value) {
-        const escKey = `${fid}::${group.dimension.id}`
-        const esc = escalationByKey.get(escKey)
-        item.discrepancies.push({
-          dimensionId: group.dimension.id,
-          dimensionLabel: group.dimension.label,
-          dimensionKey: group.dimension.key,
-          sortOrder: group.dimension.sortOrder,
-          scaleMin: group.dimension.scaleMin,
-          scaleMax: group.dimension.scaleMax,
-          scoreLabelJson: group.dimension.scoreLabelJson,
-          evaluatorA: evals[0],
-          evaluatorB: evals[1],
-          escalation: esc
-            ? {
-                id: esc.id,
-                escalatedByName: esc.escalatedBy.name,
-                escalatedByEmail: esc.escalatedBy.email,
-              }
-            : null,
-        })
-      } else {
-        item.agreements.push({
-          dimensionId: group.dimension.id,
-          dimensionLabel: group.dimension.label,
-          value: evals[0].value,
-        })
-      }
+    const [evaluatorA, evaluatorB] = group.evaluators
+    if (evaluatorA.value !== evaluatorB.value) {
+      const escalation = escalationByKey.get(
+        `${group.feedbackItem.id}::${group.dimension.id}`
+      )
+      item.discrepancies.push({
+        dimensionId: group.dimension.id,
+        dimensionLabel: group.dimension.label,
+        dimensionKey: group.dimension.key,
+        sortOrder: group.dimension.sortOrder,
+        scaleMin: group.dimension.scaleMin,
+        scaleMax: group.dimension.scaleMax,
+        scoreLabelJson: group.dimension.scoreLabelJson,
+        evaluatorA,
+        evaluatorB,
+        escalation: escalation
+          ? {
+              id: escalation.id,
+              escalatedByName: escalation.escalatedBy.name,
+              escalatedByEmail: escalation.escalatedBy.email,
+            }
+          : null,
+      })
+    } else {
+      item.agreements.push({
+        dimensionId: group.dimension.id,
+        dimensionLabel: group.dimension.label,
+        value: evaluatorA.value,
+      })
     }
   }
 
-  // Filter to only items with at least one discrepancy, sort by displayOrder
-  const discrepantItems = Array.from(itemMap.values())
+  const items = Array.from(itemMap.values())
     .filter((item) => item.discrepancies.length > 0)
-    .sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0))
+    .sort((a, b) => {
+      const aOrder = a.displayOrder ?? Number.MAX_SAFE_INTEGER
+      const bOrder = b.displayOrder ?? Number.MAX_SAFE_INTEGER
+      if (aOrder !== bOrder) return aOrder - bOrder
+      return a.feedbackItemId.localeCompare(b.feedbackItemId)
+    })
 
-  // Sort discrepancies within each item by dimension sortOrder
-  for (const item of discrepantItems) {
-    item.discrepancies.sort((a, b) => a.sortOrder - b.sortOrder)
-  }
+  const reconciledCount =
+    ownerUserId == null
+      ? 0
+      : await prisma.score.count({
+          where: {
+            feedbackItem: { batchId },
+            userId: ownerUserId,
+            dimensionId: { in: dimensionIds },
+            isReconciled: true,
+          },
+        })
 
-  // Count reconciled scores for progress tracking
-  const reconciledCount = await prisma.score.count({
-    where: {
-      feedbackItem: { batchId },
-      isReconciled: true,
-    },
-  })
-
-  // Total scoreable dimension pairs = items in batch × dimensions scored by 2 evaluators
-  const totalDimensionPairs = Array.from(groupMap.values()).filter(
-    (g) => g.evaluators.length === 2
-  ).length
-
-  const totalDiscrepancies = discrepantItems.reduce(
+  const totalDiscrepancies = items.reduce(
     (sum, item) => sum + item.discrepancies.length,
     0
   )
+  const totalDimensionPairs = Array.from(groupMap.keys()).length
 
   return NextResponse.json({
-    items: discrepantItems,
+    items,
     hasAdjudicator,
     summary: {
       totalItems: itemMap.size,
-      discrepantItems: discrepantItems.length,
+      discrepantItems: items.length,
       totalDiscrepancies,
       totalDimensionPairs,
       reconciledCount,

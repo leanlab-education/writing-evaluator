@@ -13,11 +13,19 @@ interface TeamReleaseRow {
   teamId: string
   teamName: string
   isVisible: boolean
+  status: string
   scorerUserId: string | null
   scorer: { id: string; email: string; name: string | null } | null
   members: { id: string; email: string; name: string | null }[]
   dimensions: { id: string; label: string }[]
   progressPct: number
+  irr?: {
+    isApplicable: boolean
+    isReady: boolean
+    agreementPct: number | null
+    agreedPairs: number
+    totalPairs: number
+  } | null
 }
 
 interface BatchRangeRow {
@@ -37,7 +45,13 @@ interface BatchRow {
   progressPct: number
   discrepancyCount?: number
   reconciledCount?: number
-  irrPct?: number | null
+  irrSummary?: {
+    applicableTeamCount: number
+    computedTeamCount: number
+    readyTeamCount: number
+    averageAgreementPct: number | null
+    lowestAgreementPct: number | null
+  } | null
   type: string
   isDoubleScored: boolean
   adjudicatorId?: string | null
@@ -57,6 +71,22 @@ interface Props {
   batches: BatchRow[]
   onBatchesChange: (options?: { silent?: boolean }) => void | Promise<void>
   batchesLoading: boolean
+}
+
+function getIrrBadgeClass(agreementPct: number | null, isReady: boolean) {
+  if (agreementPct == null) {
+    return 'bg-muted text-muted-foreground'
+  }
+
+  if (isReady) {
+    return 'bg-score-high-bg text-score-high-text'
+  }
+
+  if (agreementPct >= 60) {
+    return 'bg-status-active-bg text-status-active-text'
+  }
+
+  return 'bg-destructive/10 text-destructive'
 }
 
 export function BatchCreator({
@@ -105,28 +135,6 @@ export function BatchCreator({
       else next.add(batchId)
       return next
     })
-  }
-
-  async function handleBatchStatusChange(batchId: string, newStatus: string) {
-    if (
-      newStatus === 'COMPLETE' &&
-      !confirm('This will prevent annotators from making further changes to this batch. Continue?')
-    ) {
-      return
-    }
-
-    try {
-      const response = await fetch(`/api/projects/${projectId}/batches/${batchId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: newStatus }),
-      })
-      if (response.ok) {
-        await onBatchesChange({ silent: true })
-      }
-    } catch (error) {
-      console.error('Failed to update batch status:', error)
-    }
   }
 
   async function handleAdjudicatorChange(
@@ -285,6 +293,8 @@ export function BatchCreator({
                 : batch.isDoubleScored
                   ? 'bg-score-high-bg text-score-high-text'
                   : 'bg-muted text-muted-foreground'
+            const irrSummary = batch.irrSummary
+            const hasApplicableIrr = (irrSummary?.applicableTeamCount ?? 0) > 0
 
             return (
               <div key={batch.id} className={index > 0 ? 'border-t border-border' : ''}>
@@ -307,17 +317,29 @@ export function BatchCreator({
                   <Badge variant="outline" className="shrink-0 text-[10px]">
                     {visibleReleaseCount}/{batch.teamReleases.length} visible teams
                   </Badge>
-                  {batch.irrPct != null && (
+                  {hasApplicableIrr && (
+                    <Badge variant="outline" className="shrink-0 text-[10px]">
+                      IRR ready {irrSummary?.readyTeamCount}/{irrSummary?.applicableTeamCount}
+                    </Badge>
+                  )}
+                  {irrSummary?.averageAgreementPct != null && (
                     <Badge
-                      className={`shrink-0 text-[10px] ${
-                        batch.irrPct >= 80
-                          ? 'bg-score-high-bg text-score-high-text'
-                          : batch.irrPct >= 60
-                            ? 'bg-status-active-bg text-status-active-text'
-                            : 'bg-destructive/10 text-destructive'
-                      }`}
+                      className={`shrink-0 text-[10px] ${getIrrBadgeClass(
+                        irrSummary.averageAgreementPct,
+                        irrSummary.averageAgreementPct >= 80
+                      )}`}
                     >
-                      IRR {batch.irrPct}%
+                      Avg IRR {irrSummary.averageAgreementPct}%
+                    </Badge>
+                  )}
+                  {irrSummary?.lowestAgreementPct != null && (
+                    <Badge
+                      className={`shrink-0 text-[10px] ${getIrrBadgeClass(
+                        irrSummary.lowestAgreementPct,
+                        irrSummary.lowestAgreementPct >= 80
+                      )}`}
+                    >
+                      Low IRR {irrSummary.lowestAgreementPct}%
                     </Badge>
                   )}
                   <div className="ml-auto flex shrink-0 items-center gap-2">
@@ -351,22 +373,14 @@ export function BatchCreator({
                       <span>
                         Teams visible: {visibleReleaseCount}/{batch.teamReleases.length}
                       </span>
-                      <div className="ml-auto flex items-center gap-2">
-                        <span>Status:</span>
-                        <select
-                          className="flex h-7 rounded-md border border-input bg-background px-2 py-0.5 text-xs shadow-sm transition-all duration-200"
-                          value={batch.status}
-                          onChange={(event) =>
-                            handleBatchStatusChange(batch.id, event.target.value)
-                          }
-                          onClick={(event) => event.stopPropagation()}
-                        >
-                          <option value="DRAFT">Draft</option>
-                          <option value="SCORING">Scoring</option>
-                          <option value="RECONCILING">Reconciling</option>
-                          <option value="COMPLETE">Complete</option>
-                        </select>
-                      </div>
+                      {hasApplicableIrr && (
+                        <span>
+                          IRR ready: {irrSummary?.readyTeamCount}/{irrSummary?.applicableTeamCount}
+                        </span>
+                      )}
+                      <span>
+                        Batch status: {batchStatusLabels[batch.status] || batch.status}
+                      </span>
                     </div>
 
                     <div className="space-y-2">
@@ -383,9 +397,24 @@ export function BatchCreator({
                               >
                               <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                                 <div className="text-sm font-medium">{release.teamName}</div>
+                                <Badge className={`${batchStatusColors[release.status] || ''} text-[10px]`}>
+                                  {batchStatusLabels[release.status] || release.status}
+                                </Badge>
                                 <Badge variant="outline" className="text-[10px]">
                                   {release.progressPct}%
                                 </Badge>
+                                {release.irr?.isApplicable && (
+                                  <Badge
+                                    className={`text-[10px] ${getIrrBadgeClass(
+                                      release.irr.agreementPct,
+                                      release.irr.isReady
+                                    )}`}
+                                  >
+                                    {release.irr.agreementPct == null
+                                      ? 'IRR pending'
+                                      : `IRR ${release.irr.agreementPct}%`}
+                                  </Badge>
+                                )}
                                 <span className="text-xs text-muted-foreground">
                                   {batch.type === 'TRAINING'
                                     ? 'Criteria: All criteria'
@@ -399,6 +428,13 @@ export function BatchCreator({
                                     .map((member) => member.name || member.email)
                                     .join(', ')}
                                 </span>
+                                {release.irr?.isApplicable && (
+                                  <span className="text-muted-foreground">
+                                    Compared pairs: {release.irr.totalPairs > 0
+                                      ? `${release.irr.agreedPairs}/${release.irr.totalPairs} agreed`
+                                      : 'Not enough scores yet'}
+                                  </span>
+                                )}
                                 {batch.type === 'REGULAR' && !batch.isDoubleScored && (
                                   <div className="flex items-center gap-2">
                                     <span className="text-muted-foreground">Scorer:</span>

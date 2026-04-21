@@ -10,9 +10,13 @@ interface ReleaseWithContext {
   }
   isDoubleScored?: boolean
   batchType?: string
+  status?: string
   team: {
     members: {
       userId: string
+    }[]
+    dimensions?: {
+      dimensionId: string
     }[]
   }
 }
@@ -30,6 +34,68 @@ export function getExpectedReleaseUserIds(release: ReleaseWithContext): string[]
   }
 
   return release.scorerUserId ? [release.scorerUserId] : []
+}
+
+export function releaseNeedsReconciliation(release: ReleaseWithContext): boolean {
+  const batchType = release.batch?.type ?? release.batchType
+  const isDoubleScored = release.batch?.isDoubleScored ?? release.isDoubleScored
+
+  return batchType === 'TRAINING' || Boolean(isDoubleScored)
+}
+
+export function getExpectedReleaseDimensionIds(
+  release: ReleaseWithContext,
+  projectDimensionIds: string[]
+): string[] {
+  const batchType = release.batch?.type ?? release.batchType
+
+  if (batchType === 'TRAINING') {
+    return projectDimensionIds
+  }
+
+  return release.team.dimensions?.map((dimension) => dimension.dimensionId) ?? []
+}
+
+export function getReleaseOwnerUserId(release: ReleaseWithContext): string | null {
+  return release.team.members[0]?.userId ?? null
+}
+
+export async function syncBatchStatus(batchId: string) {
+  const batch = await prisma.batch.findUnique({
+    where: { id: batchId },
+    select: {
+      id: true,
+      teamReleases: {
+        select: {
+          status: true,
+        },
+      },
+    },
+  })
+
+  if (!batch) {
+    return null
+  }
+
+  const statuses = batch.teamReleases.map((release) => release.status)
+  const nextStatus =
+    statuses.length === 0
+      ? 'DRAFT'
+      : statuses.every((status) => status === 'COMPLETE')
+        ? 'COMPLETE'
+        : statuses.some((status) => status === 'RECONCILING')
+          ? 'RECONCILING'
+          : statuses.some((status) => status === 'SCORING')
+            ? 'SCORING'
+            : 'DRAFT'
+
+  return prisma.batch.update({
+    where: { id: batchId },
+    data: {
+      status: nextStatus,
+      isAssigned: statuses.some((status) => status !== 'DRAFT'),
+    },
+  })
 }
 
 export async function syncBatchAssignmentsForRelease(releaseId: string) {
@@ -51,6 +117,11 @@ export async function syncBatchAssignmentsForRelease(releaseId: string) {
             },
             orderBy: {
               user: { email: 'asc' },
+            },
+          },
+          dimensions: {
+            select: {
+              dimensionId: true,
             },
           },
         },
@@ -89,4 +160,6 @@ export async function syncBatchAssignmentsForRelease(releaseId: string) {
       data: { isAssigned: true },
     })
   })
+
+  await syncBatchStatus(release.batch.id)
 }

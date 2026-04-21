@@ -1,14 +1,6 @@
 import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/db'
-import { autoReconcileAgreedScores } from '@/lib/reconciliation'
 import { NextRequest, NextResponse } from 'next/server'
-
-const VALID_TRANSITIONS: Record<string, string[]> = {
-  DRAFT: ['SCORING'],
-  SCORING: ['RECONCILING', 'COMPLETE'],
-  RECONCILING: ['COMPLETE', 'SCORING'],
-  COMPLETE: ['SCORING'],
-}
 
 export async function PATCH(
   request: NextRequest,
@@ -38,6 +30,16 @@ export async function PATCH(
     )
   }
 
+  if (status !== undefined) {
+    return NextResponse.json(
+      {
+        error:
+          'Batch status is now derived from team release statuses and cannot be edited directly',
+      },
+      { status: 400 }
+    )
+  }
+
   const batch = await prisma.batch.findUnique({
     where: { id: batchId },
     select: { status: true, projectId: true },
@@ -61,45 +63,13 @@ export async function PATCH(
     }
   }
 
-  if (status !== undefined) {
-    const allowed = VALID_TRANSITIONS[batch.status]
-    if (!allowed || !allowed.includes(status)) {
-      return NextResponse.json(
-        {
-          error: `Cannot transition from ${batch.status} to ${status}. Allowed: ${allowed?.join(', ') || 'none'}`,
-        },
-        { status: 400 }
-      )
-    }
-  }
-
   const updated = await prisma.batch.update({
     where: { id: batchId },
     data: {
-      ...(status !== undefined
-        ? {
-            status: status as
-              | 'DRAFT'
-              | 'SCORING'
-              | 'RECONCILING'
-              | 'COMPLETE',
-          }
-        : {}),
       ...(adjudicatorId !== undefined ? { adjudicatorId } : {}),
       ...(isHidden !== undefined ? { isHidden } : {}),
     },
   })
-
-  // When transitioning to RECONCILING, auto-reconcile dimensions where both
-  // evaluators already agree. This keeps the reconciliation UI focused on
-  // actual disagreements and ensures a complete reconciled dataset for export.
-  if (
-    status !== undefined &&
-    batch.status === 'SCORING' &&
-    status === 'RECONCILING'
-  ) {
-    await autoReconcileAgreedScores(batchId)
-  }
 
   return NextResponse.json(updated)
 }

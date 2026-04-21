@@ -16,6 +16,7 @@ import { AppShell } from '@/components/app-shell'
 
 interface BatchInfo {
   id: string
+  releaseId: string | null
   name: string
   status: string
   itemCount: number
@@ -173,7 +174,7 @@ export function EvaluatorDashboard({
                                   variant="default"
                                   onClick={() =>
                                     router.push(
-                                      `/reconcile/${ep.project.id}?batchId=${batch.id}`
+                                      `/reconcile/${ep.project.id}?batchId=${batch.id}&releaseId=${batch.releaseId}`
                                     )
                                   }
                                 >

@@ -21,32 +21,52 @@ export async function POST(
   }
 
   const { projectId, batchId } = await params
+  const body = await request.json()
+  const { releaseId, feedbackItemId, dimensionId } = body as {
+    releaseId?: string
+    feedbackItemId?: string
+    dimensionId?: string
+  }
 
-  // Caller must be assigned to this batch (either evaluator) or an admin
-  const assignment = await prisma.batchAssignment.findUnique({
-    where: { batchId_userId: { batchId, userId: session.user.id } },
+  if (!releaseId || typeof releaseId !== 'string') {
+    return NextResponse.json(
+      { error: 'releaseId is required' },
+      { status: 400 }
+    )
+  }
+
+  const assignment = await prisma.batchAssignment.findFirst({
+    where: {
+      batchId,
+      userId: session.user.id,
+      teamReleaseId: releaseId,
+    },
   })
   if (!assignment && session.user.role !== 'ADMIN') {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
-  const batch = await prisma.batch.findUnique({
-    where: { id: batchId },
-    select: { status: true, projectId: true, adjudicatorId: true },
+  const release = await prisma.teamBatchRelease.findUnique({
+    where: { id: releaseId },
+    include: {
+      batch: {
+        select: { projectId: true, adjudicatorId: true },
+      },
+    },
   })
 
-  if (!batch || batch.projectId !== projectId) {
-    return NextResponse.json({ error: 'Batch not found' }, { status: 404 })
+  if (!release || release.batchId !== batchId || release.batch.projectId !== projectId) {
+    return NextResponse.json({ error: 'Release not found' }, { status: 404 })
   }
 
-  if (batch.status !== 'RECONCILING') {
+  if (release.status !== 'RECONCILING') {
     return NextResponse.json(
-      { error: 'Batch must be in RECONCILING status to escalate' },
+      { error: 'Release must be in RECONCILING status to escalate' },
       { status: 400 }
     )
   }
 
-  if (!batch.adjudicatorId) {
+  if (!release.batch.adjudicatorId) {
     return NextResponse.json(
       {
         error:
@@ -54,12 +74,6 @@ export async function POST(
       },
       { status: 400 }
     )
-  }
-
-  const body = await request.json()
-  const { feedbackItemId, dimensionId } = body as {
-    feedbackItemId?: string
-    dimensionId?: string
   }
 
   if (!feedbackItemId || typeof feedbackItemId !== 'string') {
@@ -104,6 +118,7 @@ export async function POST(
     const escalation = await prisma.escalation.create({
       data: {
         batchId,
+        teamReleaseId: releaseId,
         feedbackItemId,
         dimensionId,
         escalatedById: session.user.id,
@@ -134,27 +149,35 @@ export async function DELETE(
   }
 
   const { projectId, batchId } = await params
+  const releaseId = request.nextUrl.searchParams.get('releaseId')
   const feedbackItemId = request.nextUrl.searchParams.get('feedbackItemId')
   const dimensionId = request.nextUrl.searchParams.get('dimensionId')
-  if (!feedbackItemId || !dimensionId) {
+  if (!releaseId || !feedbackItemId || !dimensionId) {
     return NextResponse.json(
-      { error: 'feedbackItemId and dimensionId query params are required' },
+      {
+        error:
+          'releaseId, feedbackItemId, and dimensionId query params are required',
+      },
       { status: 400 }
     )
   }
 
-  const batch = await prisma.batch.findUnique({
-    where: { id: batchId },
-    select: { projectId: true },
+  const release = await prisma.teamBatchRelease.findUnique({
+    where: { id: releaseId },
+    include: {
+      batch: {
+        select: { projectId: true },
+      },
+    },
   })
-  if (!batch || batch.projectId !== projectId) {
-    return NextResponse.json({ error: 'Batch not found' }, { status: 404 })
+  if (!release || release.batchId !== batchId || release.batch.projectId !== projectId) {
+    return NextResponse.json({ error: 'Release not found' }, { status: 404 })
   }
 
   const escalation = await prisma.escalation.findUnique({
     where: {
-      batchId_feedbackItemId_dimensionId: {
-        batchId,
+      teamReleaseId_feedbackItemId_dimensionId: {
+        teamReleaseId: releaseId,
         feedbackItemId,
         dimensionId,
       },

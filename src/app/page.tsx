@@ -47,12 +47,34 @@ export default async function HomePage() {
 
   // Get batch assignments for this user
   const batchAssignments = await prisma.batchAssignment.findMany({
-    where: { userId: session.user.id },
+    where: {
+      userId: session.user.id,
+      OR: [{ teamReleaseId: null }, { teamRelease: { isVisible: true } }],
+      batch: { isHidden: false },
+    },
     include: {
+      teamRelease: {
+        include: {
+          team: {
+            include: {
+              members: {
+                select: { userId: true },
+                orderBy: { user: { email: 'asc' } },
+              },
+              dimensions: {
+                select: { dimensionId: true },
+              },
+            },
+          },
+        },
+      },
       batch: {
         include: {
           _count: { select: { feedbackItems: true } },
           project: { select: { id: true } },
+          teamReleases: {
+            select: { status: true },
+          },
         },
       },
     },
@@ -61,7 +83,16 @@ export default async function HomePage() {
   // Group batch assignments by projectId and count scored items
   const batchesByProject = new Map<
     string,
-    { id: string; name: string; status: string; itemCount: number; scoredCount: number; discrepancyCount?: number; reconciledCount?: number }[]
+    {
+      id: string
+      releaseId: string | null
+      name: string
+      status: string
+      itemCount: number
+      scoredCount: number
+      discrepancyCount?: number
+      reconciledCount?: number
+    }[]
   >()
 
   for (const ba of batchAssignments) {
@@ -75,34 +106,66 @@ export default async function HomePage() {
       },
     })
 
-    // For RECONCILING batches, compute discrepancy stats
+    const releaseStatus = ba.teamRelease?.status ?? ba.batch.status
+    const releaseId = ba.teamReleaseId ?? null
+
     let discrepancyCount: number | undefined
     let reconciledCount: number | undefined
-    if (ba.batch.status === 'RECONCILING') {
-      // Count original scores grouped by (feedbackItemId, dimensionId) with 2 evaluators that disagree
+    if (ba.teamRelease && releaseStatus === 'RECONCILING') {
+      const dimensionIds =
+        ba.batch.type === 'TRAINING'
+          ? (
+              await prisma.rubricDimension.findMany({
+                where: { projectId: ba.batch.project.id },
+                select: { id: true },
+              })
+            ).map((dimension) => dimension.id)
+          : ba.teamRelease.team.dimensions.map((dimension) => dimension.dimensionId)
+      const userIds = ba.teamRelease.team.members.map((member) => member.userId)
+      const ownerUserId = ba.teamRelease.team.members[0]?.userId
+
       const originalScores = await prisma.score.findMany({
-        where: { feedbackItem: { batchId: ba.batch.id }, isReconciled: false },
-        select: { feedbackItemId: true, dimensionId: true, value: true },
+        where: {
+          feedbackItem: { batchId: ba.batch.id },
+          userId: { in: userIds },
+          dimensionId: { in: dimensionIds },
+          isReconciled: false,
+        },
+        select: { feedbackItemId: true, dimensionId: true, value: true, userId: true },
       })
-      const groups = new Map<string, number[]>()
+      const groups = new Map<string, { value: number; userId: string }[]>()
       for (const s of originalScores) {
         const key = `${s.feedbackItemId}::${s.dimensionId}`
         if (!groups.has(key)) groups.set(key, [])
-        groups.get(key)!.push(s.value)
+        groups.get(key)!.push({ value: s.value, userId: s.userId })
       }
       discrepancyCount = 0
       for (const [, values] of groups) {
-        if (values.length === 2 && values[0] !== values[1]) discrepancyCount++
+        if (
+          values.length === 2 &&
+          values[0].userId !== values[1].userId &&
+          values[0].value !== values[1].value
+        ) {
+          discrepancyCount++
+        }
       }
-      reconciledCount = await prisma.score.count({
-        where: { feedbackItem: { batchId: ba.batch.id }, isReconciled: true },
-      })
+      if (ownerUserId) {
+        reconciledCount = await prisma.score.count({
+          where: {
+            feedbackItem: { batchId: ba.batch.id },
+            userId: ownerUserId,
+            dimensionId: { in: dimensionIds },
+            isReconciled: true,
+          },
+        })
+      }
     }
 
     batchesByProject.get(pid)!.push({
       id: ba.batch.id,
+      releaseId,
       name: ba.batch.name,
-      status: ba.batch.status,
+      status: releaseStatus,
       itemCount: ba.batch._count.feedbackItems,
       scoredCount,
       discrepancyCount,

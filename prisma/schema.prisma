@@ -259,6 +259,7 @@ model TeamBatchRelease {
   teamId       String
   scorerUserId String?
   isVisible    Boolean  @default(false)
+  status       BatchStatus @default(DRAFT)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -266,6 +267,7 @@ model TeamBatchRelease {
   team        EvaluatorTeam     @relation(fields: [teamId], references: [id], onDelete: Cascade)
   scorerUser  User?             @relation("TeamBatchReleaseScorer", fields: [scorerUserId], references: [id], onDelete: SetNull)
   assignments BatchAssignment[]
+  escalations Escalation[]
 
   @@unique([batchId, teamId])
 }
@@ -371,6 +373,7 @@ model Import {
 model Escalation {
   id             String    @id @default(cuid())
   batchId        String
+  teamReleaseId  String
   feedbackItemId String
   dimensionId    String    // Per-criterion scope — Amber 2026-04-09
   escalatedById  String    // userId of the pair member who clicked Escalate
@@ -378,11 +381,12 @@ model Escalation {
   resolvedAt     DateTime?
   createdAt      DateTime  @default(now())
 
-  batch        Batch           @relation(fields: [batchId], references: [id], onDelete: Cascade)
-  feedbackItem FeedbackItem    @relation(fields: [feedbackItemId], references: [id], onDelete: Cascade)
-  dimension    RubricDimension @relation(fields: [dimensionId], references: [id], onDelete: Cascade)
-  escalatedBy  User            @relation("EscalationEscalatedBy", fields: [escalatedById], references: [id], onDelete: Cascade)
-  resolvedBy   User?           @relation("EscalationResolvedBy", fields: [resolvedById], references: [id], onDelete: SetNull)
+  batch        Batch            @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  teamRelease  TeamBatchRelease @relation(fields: [teamReleaseId], references: [id], onDelete: Cascade)
+  feedbackItem FeedbackItem     @relation(fields: [feedbackItemId], references: [id], onDelete: Cascade)
+  dimension    RubricDimension  @relation(fields: [dimensionId], references: [id], onDelete: Cascade)
+  escalatedBy  User             @relation("EscalationEscalatedBy", fields: [escalatedById], references: [id], onDelete: Cascade)
+  resolvedBy   User?            @relation("EscalationResolvedBy", fields: [resolvedById], references: [id], onDelete: SetNull)
 
-  @@unique([batchId, feedbackItemId, dimensionId])
+  @@unique([teamReleaseId, feedbackItemId, dimensionId])
 }

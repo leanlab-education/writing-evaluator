@@ -1,10 +1,14 @@
 import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/db'
+import { maybeCompleteReleaseReconciliation } from '@/lib/reconciliation'
+import {
+  getExpectedReleaseDimensionIds,
+  getReleaseOwnerUserId,
+} from '@/lib/team-batch-releases'
 import { NextRequest, NextResponse } from 'next/server'
 
 // POST /api/projects/[projectId]/batches/[batchId]/reconcile
-// Accepts reconciled (final) scores for discrepant dimensions.
-// One evaluator submits on behalf of both partners.
+// Accepts reconciled scores for one team release.
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ projectId: string; batchId: string }> }
@@ -15,38 +19,72 @@ export async function POST(
   }
 
   const { projectId, batchId } = await params
-
-  // Must be an evaluator assigned to this batch
-  const assignment = await prisma.batchAssignment.findUnique({
-    where: { batchId_userId: { batchId, userId: session.user.id } },
-  })
-  if (!assignment) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  }
-
-  const batch = await prisma.batch.findUnique({
-    where: { id: batchId },
-    select: { status: true, projectId: true },
-  })
-
-  if (!batch || batch.projectId !== projectId) {
-    return NextResponse.json({ error: 'Batch not found' }, { status: 404 })
-  }
-
-  if (batch.status !== 'RECONCILING') {
-    return NextResponse.json(
-      { error: 'Batch must be in RECONCILING status' },
-      { status: 400 }
-    )
-  }
-
   const body = await request.json()
-  const { items } = body as {
+  const { releaseId, items } = body as {
+    releaseId?: string
     items: {
       feedbackItemId: string
       scores: { dimensionId: string; value: number }[]
       notes?: string
     }[]
+  }
+
+  if (!releaseId) {
+    return NextResponse.json({ error: 'releaseId is required' }, { status: 400 })
+  }
+
+  if (session.user.role !== 'ADMIN') {
+    const assignment = await prisma.batchAssignment.findFirst({
+      where: {
+        batchId,
+        userId: session.user.id,
+        teamReleaseId: releaseId,
+      },
+      select: { id: true },
+    })
+    if (!assignment) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+  }
+
+  const release = await prisma.teamBatchRelease.findUnique({
+    where: { id: releaseId },
+    include: {
+      batch: {
+        select: {
+          id: true,
+          projectId: true,
+          type: true,
+          isDoubleScored: true,
+        },
+      },
+      team: {
+        include: {
+          members: {
+            select: { userId: true },
+            orderBy: { user: { email: 'asc' } },
+          },
+          dimensions: {
+            select: { dimensionId: true },
+          },
+        },
+      },
+    },
+  })
+
+  if (
+    !release ||
+    release.batchId !== batchId ||
+    release.batch.projectId !== projectId
+  ) {
+    return NextResponse.json({ error: 'Release not found' }, { status: 404 })
+  }
+
+  if (release.status !== 'RECONCILING') {
+    return NextResponse.json(
+      { error: 'Release must be in RECONCILING status' },
+      { status: 400 }
+    )
   }
 
   if (!Array.isArray(items) || items.length === 0) {
@@ -56,14 +94,36 @@ export async function POST(
     )
   }
 
-  // Load rubric dimensions for validation
+  const ownerUserId = getReleaseOwnerUserId(release)
+  if (!ownerUserId) {
+    return NextResponse.json(
+      { error: 'Release has no scorer ownership context' },
+      { status: 400 }
+    )
+  }
+
+  const projectDimensionIds =
+    release.batch.type === 'TRAINING'
+      ? (
+          await prisma.rubricDimension.findMany({
+            where: { projectId },
+            select: { id: true, scaleMin: true, scaleMax: true },
+          })
+        )
+      : []
+  const allowedDimensionIds = new Set(
+    getExpectedReleaseDimensionIds(
+      release,
+      projectDimensionIds.map((dimension) => dimension.id)
+    )
+  )
+
   const dimensions = await prisma.rubricDimension.findMany({
     where: { projectId },
     select: { id: true, scaleMin: true, scaleMax: true },
   })
   const dimMap = new Map(dimensions.map((d) => [d.id, d]))
 
-  // Validate all scores before writing anything
   for (const item of items) {
     if (!item.feedbackItemId || !Array.isArray(item.scores)) {
       return NextResponse.json(
@@ -72,7 +132,6 @@ export async function POST(
       )
     }
 
-    // Verify item belongs to this batch
     const feedbackItem = await prisma.feedbackItem.findUnique({
       where: { id: item.feedbackItemId },
       select: { batchId: true },
@@ -85,6 +144,12 @@ export async function POST(
     }
 
     for (const score of item.scores) {
+      if (!allowedDimensionIds.has(score.dimensionId)) {
+        return NextResponse.json(
+          { error: `Dimension ${score.dimensionId} is not part of this release` },
+          { status: 400 }
+        )
+      }
       const dim = dimMap.get(score.dimensionId)
       if (!dim) {
         return NextResponse.json(
@@ -101,16 +166,16 @@ export async function POST(
     }
   }
 
-  // Create/update reconciled scores
   let reconciledCount = 0
+  const releaseUserIds = release.team.members.map((member) => member.userId)
 
   for (const item of items) {
     for (const score of item.scores) {
-      // Look up the two original scores for audit trail
       const originals = await prisma.score.findMany({
         where: {
           feedbackItemId: item.feedbackItemId,
           dimensionId: score.dimensionId,
+          userId: { in: releaseUserIds },
           isReconciled: false,
         },
         select: { id: true },
@@ -122,7 +187,7 @@ export async function POST(
         where: {
           feedbackItemId_userId_dimensionId_isReconciled: {
             feedbackItemId: item.feedbackItemId,
-            userId: session.user.id,
+            userId: ownerUserId,
             dimensionId: score.dimensionId,
             isReconciled: true,
           },
@@ -135,7 +200,7 @@ export async function POST(
         },
         create: {
           feedbackItemId: item.feedbackItemId,
-          userId: session.user.id,
+          userId: ownerUserId,
           dimensionId: score.dimensionId,
           value: score.value,
           isReconciled: true,
@@ -147,6 +212,8 @@ export async function POST(
       reconciledCount++
     }
   }
+
+  await maybeCompleteReleaseReconciliation(releaseId)
 
   return NextResponse.json({ saved: true, reconciledCount })
 }

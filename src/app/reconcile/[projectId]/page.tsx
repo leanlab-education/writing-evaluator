@@ -8,30 +8,42 @@ export default async function ReconcilePage({
   searchParams,
 }: {
   params: Promise<{ projectId: string }>
-  searchParams: Promise<{ batchId?: string }>
+  searchParams: Promise<{ batchId?: string; releaseId?: string }>
 }) {
   const session = await auth()
   if (!session?.user) redirect('/login')
 
   const { projectId } = await params
-  const { batchId } = await searchParams
+  const { batchId, releaseId } = await searchParams
 
-  if (!batchId) redirect('/')
+  if (!batchId || !releaseId) redirect('/')
 
-  // Verify the batch is in RECONCILING state and belongs to this project
-  const batch = await prisma.batch.findUnique({
-    where: { id: batchId },
-    select: { status: true, projectId: true, name: true },
+  const release = await prisma.teamBatchRelease.findUnique({
+    where: { id: releaseId },
+    include: {
+      batch: {
+        select: { id: true, projectId: true, name: true },
+      },
+    },
   })
 
-  if (!batch || batch.projectId !== projectId || batch.status !== 'RECONCILING') {
+  if (
+    !release ||
+    release.batchId !== batchId ||
+    release.batch.projectId !== projectId ||
+    release.status !== 'RECONCILING'
+  ) {
     redirect('/')
   }
 
-  // Verify user is assigned to this batch (or is admin)
+  // Verify user is assigned to this release (or is admin)
   if (session.user.role !== 'ADMIN') {
-    const assignment = await prisma.batchAssignment.findUnique({
-      where: { batchId_userId: { batchId, userId: session.user.id } },
+    const assignment = await prisma.batchAssignment.findFirst({
+      where: {
+        batchId,
+        userId: session.user.id,
+        teamReleaseId: releaseId,
+      },
     })
     if (!assignment) redirect('/')
   }
@@ -40,7 +52,8 @@ export default async function ReconcilePage({
     <ReconcileClient
       projectId={projectId}
       batchId={batchId}
-      batchName={batch.name}
+      releaseId={releaseId}
+      batchName={release.batch.name}
       userName={session.user.name || session.user.email || 'Annotator'}
     />
   )

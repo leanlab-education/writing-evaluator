@@ -1,53 +1,148 @@
 import { prisma } from '@/lib/db'
 
 /**
- * Computes exact-match inter-rater reliability (IRR) for a batch.
+ * Computes exact-match inter-rater reliability (IRR) for each team release in a
+ * batch, plus a simple batch-level rollup for admin display.
  *
- * Returns percentage of (item, dimension) pairs where both evaluators
- * gave the same value, out of total pairs where both evaluators scored.
+ * Returns percentage of (item, dimension) pairs where both evaluators gave the
+ * same value, out of total pairs where both evaluators scored.
  * Per Amber's 2026-04-09 meeting: "exact match required" — no tolerance band.
  *
  * Per Amber's answer to Q2: display this to admins; there is no automatic
  * gate. Admins decide when to release Independent batches based on IRR.
  *
- * Only meaningful for batches with exactly 2 evaluators. For Training
- * batches (8 evaluators scoring everything) this returns null since
- * pairwise IRR isn't applicable to the multi-rater case.
+ * IRR is defined for:
+ * - TRAINING batches: per-team comparison of that team's two members across
+ *   all project criteria
+ * - REGULAR double-scored batches: per-team comparison of that team's two
+ *   members across that team's assigned criteria
  *
- * Returns null if IRR can't be computed (fewer than 2 evaluators, no
- * scored pairs yet, etc).
+ * Single-scored regular batches have no IRR.
  */
-export interface BatchIRR {
-  agreementPct: number // 0-100
+export const IRR_READY_THRESHOLD_PCT = 80
+
+export interface TeamReleaseIRR {
+  releaseId: string
+  teamId: string
+  teamName: string
+  isApplicable: boolean
+  isReady: boolean
+  agreementPct: number | null
   agreedPairs: number
   totalPairs: number
   perDimension: {
     dimensionId: string
     dimensionLabel: string
-    agreementPct: number
+    agreementPct: number | null
     agreedPairs: number
     totalPairs: number
   }[]
 }
 
-export async function computeBatchIRR(batchId: string): Promise<BatchIRR | null> {
+export interface BatchIRRSummary {
+  applicableTeamCount: number
+  computedTeamCount: number
+  readyTeamCount: number
+  averageAgreementPct: number | null
+  lowestAgreementPct: number | null
+  teams: TeamReleaseIRR[]
+}
+
+export async function computeBatchIRRSummary(
+  batchId: string
+): Promise<BatchIRRSummary | null> {
   const batch = await prisma.batch.findUnique({
     where: { id: batchId },
-    select: {
-      type: true,
-      assignments: { select: { userId: true } },
+    include: {
+      teamReleases: {
+        include: {
+          team: {
+            include: {
+              members: {
+                select: { userId: true },
+                orderBy: { user: { email: 'asc' } },
+              },
+              dimensions: {
+                include: {
+                  dimension: {
+                    select: { id: true, label: true, sortOrder: true },
+                  },
+                },
+                orderBy: { dimension: { sortOrder: 'asc' } },
+              },
+            },
+          },
+        },
+        orderBy: { team: { name: 'asc' } },
+      },
     },
   })
   if (!batch) return null
 
-  // Only compute for exactly-2-evaluator batches; multi-rater IRR (8 coders
-  // on a Training batch) is a different calculation and out of scope.
-  if (batch.assignments.length !== 2) return null
-  if (batch.type === 'TRAINING') return null
+  const isApplicableBatch =
+    batch.type === 'TRAINING' ||
+    (batch.type === 'REGULAR' && batch.isDoubleScored)
+
+  const projectDimensions =
+    batch.type === 'TRAINING'
+      ? await prisma.rubricDimension.findMany({
+          where: { projectId: batch.projectId },
+          select: { id: true, label: true, sortOrder: true },
+          orderBy: { sortOrder: 'asc' },
+        })
+      : []
+
+  const applicableReleases = batch.teamReleases.filter((release) => {
+    if (!isApplicableBatch) return false
+    if (release.team.members.length !== 2) return false
+    return batch.type === 'TRAINING'
+      ? projectDimensions.length > 0
+      : release.team.dimensions.length > 0
+  })
+
+  if (!isApplicableBatch) {
+    return {
+      applicableTeamCount: 0,
+      computedTeamCount: 0,
+      readyTeamCount: 0,
+      averageAgreementPct: null,
+      lowestAgreementPct: null,
+      teams: batch.teamReleases.map((release) => ({
+        releaseId: release.id,
+        teamId: release.teamId,
+        teamName: release.team.name,
+        isApplicable: false,
+        isReady: false,
+        agreementPct: null,
+        agreedPairs: 0,
+        totalPairs: 0,
+        perDimension: [],
+      })),
+    }
+  }
+
+  const relevantUserIds = [
+    ...new Set(
+      applicableReleases.flatMap((release) =>
+        release.team.members.map((member) => member.userId)
+      )
+    ),
+  ]
+  const relevantDimensionIds = [
+    ...new Set(
+      applicableReleases.flatMap((release) =>
+        batch.type === 'TRAINING'
+          ? projectDimensions.map((dimension) => dimension.id)
+          : release.team.dimensions.map((dimension) => dimension.dimensionId)
+      )
+    ),
+  ]
 
   const scores = await prisma.score.findMany({
     where: {
       feedbackItem: { batchId },
+      userId: { in: relevantUserIds },
+      dimensionId: { in: relevantDimensionIds },
       isReconciled: false,
     },
     select: {
@@ -59,71 +154,133 @@ export async function computeBatchIRR(batchId: string): Promise<BatchIRR | null>
     },
   })
 
-  // Group by (item, dimension) and collect both evaluators' values
-  const groups = new Map<
-    string,
-    {
-      dimensionId: string
-      dimensionLabel: string
-      sortOrder: number
-      values: number[]
+  const teams = batch.teamReleases.map((release): TeamReleaseIRR => {
+    const dimensionSource =
+      batch.type === 'TRAINING'
+        ? projectDimensions
+        : release.team.dimensions.map((dimension) => dimension.dimension)
+    const userIds = release.team.members.map((member) => member.userId)
+
+    if (
+      !isApplicableBatch ||
+      userIds.length !== 2 ||
+      dimensionSource.length === 0
+    ) {
+      return {
+        releaseId: release.id,
+        teamId: release.teamId,
+        teamName: release.team.name,
+        isApplicable: false,
+        isReady: false,
+        agreementPct: null,
+        agreedPairs: 0,
+        totalPairs: 0,
+        perDimension: [],
+      }
     }
-  >()
-  for (const s of scores) {
-    const key = `${s.feedbackItemId}::${s.dimensionId}`
-    if (!groups.has(key)) {
-      groups.set(key, {
-        dimensionId: s.dimension.id,
-        dimensionLabel: s.dimension.label,
-        sortOrder: s.dimension.sortOrder,
-        values: [],
-      })
+
+    const userIdSet = new Set(userIds)
+    const dimensionIdSet = new Set(dimensionSource.map((dimension) => dimension.id))
+    const groups = new Map<
+      string,
+      {
+        dimensionId: string
+        dimensionLabel: string
+        sortOrder: number
+        valuesByUser: Map<string, number>
+      }
+    >()
+
+    for (const score of scores) {
+      if (!userIdSet.has(score.userId) || !dimensionIdSet.has(score.dimensionId)) {
+        continue
+      }
+
+      const key = `${score.feedbackItemId}::${score.dimensionId}`
+      if (!groups.has(key)) {
+        groups.set(key, {
+          dimensionId: score.dimension.id,
+          dimensionLabel: score.dimension.label,
+          sortOrder: score.dimension.sortOrder,
+          valuesByUser: new Map(),
+        })
+      }
+
+      groups.get(key)!.valuesByUser.set(score.userId, score.value)
     }
-    groups.get(key)!.values.push(s.value)
-  }
 
-  let agreedPairs = 0
-  let totalPairs = 0
+    let agreedPairs = 0
+    let totalPairs = 0
+    const perDim = new Map<
+      string,
+      { label: string; sortOrder: number; agreed: number; total: number }
+    >()
 
-  // Per-dimension aggregates
-  const perDim = new Map<
-    string,
-    { label: string; sortOrder: number; agreed: number; total: number }
-  >()
+    for (const [, group] of groups) {
+      if (group.valuesByUser.size !== 2) continue
 
-  for (const [, g] of groups) {
-    if (g.values.length !== 2) continue
-    totalPairs++
-    const agreed = g.values[0] === g.values[1]
-    if (agreed) agreedPairs++
+      const values = Array.from(group.valuesByUser.values())
+      const agreed = values[0] === values[1]
 
-    const entry = perDim.get(g.dimensionId) ?? {
-      label: g.dimensionLabel,
-      sortOrder: g.sortOrder,
-      agreed: 0,
-      total: 0,
+      totalPairs++
+      if (agreed) agreedPairs++
+
+      const entry = perDim.get(group.dimensionId) ?? {
+        label: group.dimensionLabel,
+        sortOrder: group.sortOrder,
+        agreed: 0,
+        total: 0,
+      }
+      entry.total++
+      if (agreed) entry.agreed++
+      perDim.set(group.dimensionId, entry)
     }
-    entry.total++
-    if (agreed) entry.agreed++
-    perDim.set(g.dimensionId, entry)
-  }
 
-  if (totalPairs === 0) return null
+    const agreementPct =
+      totalPairs > 0 ? Math.round((agreedPairs / totalPairs) * 100) : null
 
-  const perDimension = Array.from(perDim.entries())
-    .sort((a, b) => a[1].sortOrder - b[1].sortOrder)
-    .map(([dimensionId, entry]) => ({
-      dimensionId,
-      dimensionLabel: entry.label,
-      agreementPct: Math.round((entry.agreed / entry.total) * 100),
-      agreedPairs: entry.agreed,
-      totalPairs: entry.total,
-    }))
+    return {
+      releaseId: release.id,
+      teamId: release.teamId,
+      teamName: release.team.name,
+      isApplicable: true,
+      isReady:
+        agreementPct !== null && agreementPct >= IRR_READY_THRESHOLD_PCT,
+      agreementPct,
+      agreedPairs,
+      totalPairs,
+      perDimension: Array.from(perDim.entries())
+        .sort((a, b) => a[1].sortOrder - b[1].sortOrder)
+        .map(([dimensionId, entry]) => ({
+          dimensionId,
+          dimensionLabel: entry.label,
+          agreementPct:
+            entry.total > 0 ? Math.round((entry.agreed / entry.total) * 100) : null,
+          agreedPairs: entry.agreed,
+          totalPairs: entry.total,
+        })),
+    }
+  })
+
+  const computedTeams = teams.filter((team) => team.agreementPct !== null)
 
   return {
-    agreementPct: Math.round((agreedPairs / totalPairs) * 100),
-    agreedPairs,
-    totalPairs,
-    perDimension,
+    applicableTeamCount: teams.filter((team) => team.isApplicable).length,
+    computedTeamCount: computedTeams.length,
+    readyTeamCount: teams.filter((team) => team.isReady).length,
+    averageAgreementPct:
+      computedTeams.length > 0
+        ? Math.round(
+            computedTeams.reduce(
+              (sum, team) => sum + (team.agreementPct ?? 0),
+              0
+            ) / computedTeams.length
+          )
+        : null,
+    lowestAgreementPct:
+      computedTeams.length > 0
+        ? Math.min(...computedTeams.map((team) => team.agreementPct ?? 100))
+        : null,
+    teams,
   }
 }

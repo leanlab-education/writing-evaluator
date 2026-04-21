@@ -122,11 +122,13 @@ function parseScoreLabels(
 export function ReconcileClient({
   projectId,
   batchId,
+  releaseId,
   batchName,
   userName,
 }: {
   projectId: string
   batchId: string
+  releaseId: string
   batchName: string
   userName: string
 }) {
@@ -147,7 +149,7 @@ export function ReconcileClient({
     async function fetchDiscrepancies() {
       try {
         const res = await fetch(
-          `/api/projects/${projectId}/batches/${batchId}/discrepancies`
+          `/api/projects/${projectId}/batches/${batchId}/discrepancies?releaseId=${releaseId}`
         )
         if (!res.ok) throw new Error('Failed to fetch discrepancies')
         const data: DiscrepancyResponse = await res.json()
@@ -177,7 +179,7 @@ export function ReconcileClient({
       }
     }
     fetchDiscrepancies()
-  }, [projectId, batchId])
+  }, [projectId, batchId, releaseId])
 
   const currentItem = items[currentIndex] ?? null
   const currentState = currentItem ? itemStates[currentItem.feedbackItemId] : null
@@ -240,6 +242,7 @@ export function ReconcileClient({
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
+              releaseId,
               feedbackItemId: currentItem.feedbackItemId,
               dimensionId,
             }),
@@ -292,7 +295,7 @@ export function ReconcileClient({
         setEscalatingDimId(null)
       }
     },
-    [currentItem, projectId, batchId, userName]
+    [currentItem, projectId, batchId, releaseId, userName]
   )
 
   const handleWithdrawEscalation = useCallback(
@@ -301,7 +304,7 @@ export function ReconcileClient({
       setEscalatingDimId(dimensionId)
       try {
         const res = await fetch(
-          `/api/projects/${projectId}/batches/${batchId}/escalate?feedbackItemId=${currentItem.feedbackItemId}&dimensionId=${dimensionId}`,
+          `/api/projects/${projectId}/batches/${batchId}/escalate?releaseId=${releaseId}&feedbackItemId=${currentItem.feedbackItemId}&dimensionId=${dimensionId}`,
           { method: 'DELETE' }
         )
         if (!res.ok) {
@@ -327,7 +330,7 @@ export function ReconcileClient({
         setEscalatingDimId(null)
       }
     },
-    [currentItem, projectId, batchId]
+    [currentItem, projectId, batchId, releaseId]
   )
 
   const handleSaveAndContinue = useCallback(async () => {
@@ -355,6 +358,7 @@ export function ReconcileClient({
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
+            releaseId,
             items: [
               {
                 feedbackItemId: currentItem.feedbackItemId,
@@ -395,7 +399,7 @@ export function ReconcileClient({
     } finally {
       setSaving(false)
     }
-  }, [currentItem, currentState, allDiscrepanciesScored, projectId, batchId, items, currentIndex, itemStates])
+  }, [currentItem, currentState, allDiscrepanciesScored, projectId, batchId, releaseId, items, currentIndex, itemStates])
 
   // Loading state
   if (loading) {

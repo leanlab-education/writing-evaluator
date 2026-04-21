@@ -1,6 +1,9 @@
 import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/db'
-import { syncBatchAssignmentsForRelease } from '@/lib/team-batch-releases'
+import {
+  syncBatchAssignmentsForRelease,
+  syncBatchStatus,
+} from '@/lib/team-batch-releases'
 import { NextRequest, NextResponse } from 'next/server'
 
 async function getReleaseContext(releaseId: string) {
@@ -35,9 +38,15 @@ async function hasReleaseScores(releaseId: string) {
   if (!release) return false
 
   const teamUserIds = release.team.members.map((member) => member.userId)
-  const dimensionIds = release.team.dimensions.map(
-    (dimension) => dimension.dimensionId
-  )
+  const dimensionIds =
+    release.batch.type === 'TRAINING'
+      ? (
+          await prisma.rubricDimension.findMany({
+            where: { projectId: release.batch.projectId },
+            select: { id: true },
+          })
+        ).map((dimension) => dimension.id)
+      : release.team.dimensions.map((dimension) => dimension.dimensionId)
 
   const scoreCount = await prisma.score.count({
     where: {
@@ -80,9 +89,9 @@ export async function PATCH(
     return NextResponse.json({ error: 'Release not found' }, { status: 404 })
   }
 
-  if (release.batch.status === 'COMPLETE') {
+  if (release.status === 'COMPLETE') {
     return NextResponse.json(
-      { error: 'Cannot change a release on a completed batch' },
+      { error: 'Cannot change a completed release' },
       { status: 400 }
     )
   }
@@ -120,7 +129,14 @@ export async function PATCH(
   const updated = await prisma.teamBatchRelease.update({
     where: { id: releaseId },
     data: {
-      ...(isVisible !== undefined ? { isVisible } : {}),
+      ...(isVisible !== undefined
+        ? {
+            isVisible,
+            ...(isVisible && release.status === 'DRAFT'
+              ? { status: 'SCORING' }
+              : {}),
+          }
+        : {}),
       ...(release.batch.type === 'TRAINING' || release.batch.isDoubleScored
         ? {}
         : scorerUserId !== undefined
@@ -130,13 +146,7 @@ export async function PATCH(
   })
 
   await syncBatchAssignmentsForRelease(releaseId)
-
-  if (updated.isVisible && release.batch.status === 'DRAFT') {
-    await prisma.batch.update({
-      where: { id: batchId },
-      data: { status: 'SCORING' },
-    })
-  }
+  await syncBatchStatus(batchId)
 
   return NextResponse.json(updated)
 }
@@ -179,6 +189,8 @@ export async function DELETE(
       where: { id: releaseId },
     })
   })
+
+  await syncBatchStatus(batchId)
 
   return NextResponse.json({ success: true })
 }

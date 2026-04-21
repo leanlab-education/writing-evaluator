@@ -1,5 +1,7 @@
 import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/db'
+import { maybeCompleteReleaseReconciliation } from '@/lib/reconciliation'
+import { getReleaseOwnerUserId } from '@/lib/team-batch-releases'
 import { NextRequest, NextResponse } from 'next/server'
 
 // GET /api/adjudicate
@@ -27,6 +29,20 @@ export async function GET(_request: NextRequest) {
           projectId: true,
           adjudicatorId: true,
           project: { select: { id: true, name: true } },
+        },
+      },
+      teamRelease: {
+        include: {
+          team: {
+            include: {
+              members: {
+                include: {
+                  user: { select: { id: true, name: true, email: true } },
+                },
+                orderBy: { user: { email: 'asc' } },
+              },
+            },
+          },
         },
       },
       feedbackItem: {
@@ -88,15 +104,24 @@ export async function GET(_request: NextRequest) {
     }[]
   >()
   for (const s of originalScores) {
-    const key = `${s.feedbackItemId}::${s.dimensionId}`
-    if (!scoresByKey.has(key)) scoresByKey.set(key, [])
-    scoresByKey.get(key)!.push({
-      userId: s.user.id,
-      name: s.user.name,
-      email: s.user.email,
-      value: s.value,
-      notes: s.notes,
-    })
+    const matchingEscalations = escalations.filter(
+      (esc) => esc.feedbackItemId === s.feedbackItemId && esc.dimensionId === s.dimensionId
+    )
+    for (const esc of matchingEscalations) {
+      const releaseUserIds = new Set(
+        esc.teamRelease.team.members.map((member) => member.userId)
+      )
+      if (!releaseUserIds.has(s.user.id)) continue
+      const key = `${esc.teamReleaseId}::${s.feedbackItemId}::${s.dimensionId}`
+      if (!scoresByKey.has(key)) scoresByKey.set(key, [])
+      scoresByKey.get(key)!.push({
+        userId: s.user.id,
+        name: s.user.name,
+        email: s.user.email,
+        value: s.value,
+        notes: s.notes,
+      })
+    }
   }
 
   // Reconciliation notes — the pair's "Why we decided" text, stored on
@@ -106,32 +131,44 @@ export async function GET(_request: NextRequest) {
       feedbackItemId: { in: itemIds },
       isReconciled: true,
     },
-    select: { feedbackItemId: true, notes: true },
+    select: { feedbackItemId: true, userId: true, notes: true },
   })
   const reconciliationNotesByItem = new Map<string, string>()
-  for (const r of reconciledScores) {
-    if (
-      r.notes &&
-      r.notes.trim() &&
-      !reconciliationNotesByItem.has(r.feedbackItemId)
-    ) {
-      reconciliationNotesByItem.set(r.feedbackItemId, r.notes)
+  for (const esc of escalations) {
+    const ownerUserId = getReleaseOwnerUserId(esc.teamRelease)
+    if (!ownerUserId) continue
+    const note = reconciledScores.find(
+      (score) =>
+        score.feedbackItemId === esc.feedbackItemId &&
+        score.userId === ownerUserId &&
+        score.notes &&
+        score.notes.trim()
+    )?.notes
+    if (note) {
+      reconciliationNotesByItem.set(
+        `${esc.teamReleaseId}::${esc.feedbackItemId}`,
+        note
+      )
     }
   }
 
   const items = escalations.map((esc) => {
-    const key = `${esc.feedbackItemId}::${esc.dimensionId}`
+    const key = `${esc.teamReleaseId}::${esc.feedbackItemId}::${esc.dimensionId}`
     const scores = scoresByKey.get(key) || []
     return {
       escalationId: esc.id,
       batch: esc.batch,
+      releaseId: esc.teamReleaseId,
+      teamName: esc.teamRelease.team.name,
       feedbackItem: esc.feedbackItem,
       dimension: esc.dimension,
       escalatedBy: esc.escalatedBy,
       createdAt: esc.createdAt,
       scores,
       reconciliationNotes:
-        reconciliationNotesByItem.get(esc.feedbackItemId) || null,
+        reconciliationNotesByItem.get(
+          `${esc.teamReleaseId}::${esc.feedbackItemId}`
+        ) || null,
     }
   })
 
@@ -167,7 +204,19 @@ export async function POST(request: NextRequest) {
   const escalations = await prisma.escalation.findMany({
     where: { id: { in: ids }, resolvedAt: null },
     include: {
-      batch: { select: { id: true, adjudicatorId: true, status: true } },
+      batch: { select: { id: true, adjudicatorId: true } },
+      teamRelease: {
+        include: {
+          team: {
+            include: {
+              members: {
+                select: { userId: true },
+                orderBy: { user: { email: 'asc' } },
+              },
+            },
+          },
+        },
+      },
       dimension: { select: { scaleMin: true, scaleMax: true } },
     },
   })
@@ -189,9 +238,9 @@ export async function POST(request: NextRequest) {
         { status: 403 }
       )
     }
-    if (esc.batch.status !== 'RECONCILING') {
+    if (esc.teamRelease.status !== 'RECONCILING') {
       return NextResponse.json(
-        { error: 'Batch is not in RECONCILING status' },
+        { error: 'Release is not in RECONCILING status' },
         { status: 400 }
       )
     }
@@ -215,19 +264,23 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // Write reconciled Score rows and mark escalations resolved.
-  // We pick the adjudicator's own userId as the owner of the reconciled
-  // Score row — this keeps provenance clear ("this final score came from
-  // the adjudicator, not the original pair").
   const now = new Date()
   for (const r of resolutions) {
     const esc = escById.get(r.escalationId)!
+    const ownerUserId = getReleaseOwnerUserId(esc.teamRelease)
+    if (!ownerUserId) {
+      return NextResponse.json(
+        { error: 'Release has no scorer ownership context' },
+        { status: 400 }
+      )
+    }
+    const releaseUserIds = esc.teamRelease.team.members.map((member) => member.userId)
 
-    // Fetch original scores for reconciledFrom audit trail
     const originals = await prisma.score.findMany({
       where: {
         feedbackItemId: esc.feedbackItemId,
         dimensionId: esc.dimensionId,
+        userId: { in: releaseUserIds },
         isReconciled: false,
       },
       select: { id: true },
@@ -239,7 +292,7 @@ export async function POST(request: NextRequest) {
         where: {
           feedbackItemId_userId_dimensionId_isReconciled: {
             feedbackItemId: esc.feedbackItemId,
-            userId: session.user!.id,
+            userId: ownerUserId,
             dimensionId: esc.dimensionId,
             isReconciled: true,
           },
@@ -252,7 +305,7 @@ export async function POST(request: NextRequest) {
         },
         create: {
           feedbackItemId: esc.feedbackItemId,
-          userId: session.user!.id,
+          userId: ownerUserId,
           dimensionId: esc.dimensionId,
           value: r.value,
           isReconciled: true,
@@ -265,6 +318,8 @@ export async function POST(request: NextRequest) {
         data: { resolvedById: session.user!.id, resolvedAt: now },
       }),
     ])
+
+    await maybeCompleteReleaseReconciliation(esc.teamReleaseId)
   }
 
   return NextResponse.json({ resolved: resolutions.length })

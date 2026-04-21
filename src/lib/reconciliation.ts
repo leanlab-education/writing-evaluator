@@ -1,26 +1,99 @@
 import { prisma } from '@/lib/db'
-import { isBatchFullyScored } from '@/lib/batch-progress'
+import {
+  getExpectedReleaseDimensionIds,
+  getExpectedReleaseUserIds,
+  getReleaseOwnerUserId,
+  releaseNeedsReconciliation,
+  syncBatchStatus,
+} from '@/lib/team-batch-releases'
+
+async function getReleaseContext(releaseId: string) {
+  return prisma.teamBatchRelease.findUnique({
+    where: { id: releaseId },
+    include: {
+      batch: {
+        select: {
+          id: true,
+          projectId: true,
+          type: true,
+          isDoubleScored: true,
+        },
+      },
+      team: {
+        include: {
+          members: {
+            select: { userId: true },
+            orderBy: { user: { email: 'asc' } },
+          },
+          dimensions: {
+            select: { dimensionId: true },
+          },
+        },
+      },
+    },
+  })
+}
+
+async function getReleaseDimensionIds(
+  release: NonNullable<Awaited<ReturnType<typeof getReleaseContext>>>
+) {
+  const projectDimensionIds =
+    release.batch.type === 'TRAINING'
+      ? (
+          await prisma.rubricDimension.findMany({
+            where: { projectId: release.batch.projectId },
+            select: { id: true },
+          })
+        ).map((dimension) => dimension.id)
+      : []
+
+  return getExpectedReleaseDimensionIds(release, projectDimensionIds)
+}
+
+export async function isReleaseFullyScored(releaseId: string): Promise<boolean> {
+  const release = await getReleaseContext(releaseId)
+  if (!release) return false
+  if (!release.isVisible) return false
+
+  const userIds = getExpectedReleaseUserIds(release)
+  const dimensionIds = await getReleaseDimensionIds(release)
+  if (userIds.length === 0 || dimensionIds.length === 0) return false
+
+  const itemCount = await prisma.feedbackItem.count({
+    where: { batchId: release.batchId },
+  })
+  if (itemCount === 0) return false
+
+  const expectedCount = itemCount * userIds.length * dimensionIds.length
+  const actualCount = await prisma.score.count({
+    where: {
+      feedbackItem: { batchId: release.batchId },
+      userId: { in: userIds },
+      dimensionId: { in: dimensionIds },
+      isReconciled: false,
+    },
+  })
+
+  return actualCount >= expectedCount
+}
 
 /**
- * For each (feedbackItemId, dimensionId) pair in the batch where two
- * evaluators scored the same value, create a reconciled Score record
- * automatically. Called when a batch transitions SCORING → RECONCILING so
- * the reconcile UI only surfaces actual disagreements.
- *
- * The auto-reconciled Score rows are owned by the batch's first assigned
- * evaluator (by assignment creation order) — a role-free convention.
+ * Create reconciled Score rows for agreed dimensions within one release.
  */
-export async function autoReconcileAgreedScores(batchId: string) {
-  const firstAssignment = await prisma.batchAssignment.findFirst({
-    where: { batchId },
-    orderBy: { createdAt: 'asc' },
-    select: { userId: true },
-  })
-  if (!firstAssignment) return
+export async function autoReconcileAgreedScoresForRelease(releaseId: string) {
+  const release = await getReleaseContext(releaseId)
+  if (!release) return
+
+  const userIds = getExpectedReleaseUserIds(release)
+  const ownerUserId = getReleaseOwnerUserId(release)
+  const dimensionIds = await getReleaseDimensionIds(release)
+  if (userIds.length !== 2 || !ownerUserId || dimensionIds.length === 0) return
 
   const scores = await prisma.score.findMany({
     where: {
-      feedbackItem: { batchId },
+      feedbackItem: { batchId: release.batchId },
+      userId: { in: userIds },
+      dimensionId: { in: dimensionIds },
       isReconciled: false,
     },
     select: {
@@ -51,10 +124,11 @@ export async function autoReconcileAgreedScores(batchId: string) {
 
   for (const [, group] of groups) {
     if (group.length !== 2) continue
+    if (group[0].userId === group[1].userId) continue
     if (group[0].value !== group[1].value) continue
     toCreate.push({
       feedbackItemId: group[0].feedbackItemId,
-      userId: firstAssignment.userId,
+      userId: ownerUserId,
       dimensionId: group[0].dimensionId,
       value: group[0].value,
       isReconciled: true,
@@ -89,56 +163,113 @@ export async function autoReconcileAgreedScores(batchId: string) {
   }
 }
 
-/**
- * After a score is saved, check whether the batch is now fully scored by
- * every assigned evaluator. If so, auto-transition SCORING → RECONCILING
- * and run auto-reconciliation on agreed dimensions.
- *
- * Per Amber's 2026-04-09 meeting answer: "I think it auto-triggering would
- * be great. I don't see any advantages to having one of us review before
- * manually releasing reconciliation view."
- *
- * Only triggers when:
- *  - Batch is in SCORING status
- *  - Batch has 2+ assigned evaluators (single-scorer batches never need it)
- *  - Every evaluator has finished every expected (item × dimension)
- */
-export async function maybeAutoTransitionToReconciling(
-  batchId: string
+export async function maybeAdvanceReleaseAfterScore(
+  releaseId: string
 ): Promise<boolean> {
-  const batch = await prisma.batch.findUnique({
-    where: { id: batchId },
-    select: {
-      status: true,
-      assignments: {
-        select: {
-          userId: true,
-          teamRelease: {
-            select: { isVisible: true },
-          },
-        },
-      },
-      teamReleases: {
-        select: { isVisible: true },
-      },
-    },
-  })
-  if (!batch) return false
-  if (batch.status !== 'SCORING') return false
-  if (batch.teamReleases.some((release) => !release.isVisible)) return false
+  const release = await getReleaseContext(releaseId)
+  if (!release) return false
+  if (release.status !== 'SCORING') return false
 
-  const visibleAssignments = batch.assignments.filter(
-    (assignment) => assignment.teamRelease?.isVisible ?? true
-  )
-  if (visibleAssignments.length < 2) return false
-
-  const done = await isBatchFullyScored(batchId)
+  const done = await isReleaseFullyScored(releaseId)
   if (!done) return false
 
-  await prisma.batch.update({
-    where: { id: batchId },
-    data: { status: 'RECONCILING' },
+  if (releaseNeedsReconciliation(release)) {
+    await prisma.teamBatchRelease.update({
+      where: { id: releaseId },
+      data: { status: 'RECONCILING' },
+    })
+    await autoReconcileAgreedScoresForRelease(releaseId)
+  } else {
+    await prisma.teamBatchRelease.update({
+      where: { id: releaseId },
+      data: { status: 'COMPLETE' },
+    })
+  }
+
+  await syncBatchStatus(release.batchId)
+  return true
+}
+
+export async function maybeCompleteReleaseReconciliation(
+  releaseId: string
+): Promise<boolean> {
+  const release = await getReleaseContext(releaseId)
+  if (!release) return false
+  if (release.status !== 'RECONCILING') return false
+
+  const userIds = getExpectedReleaseUserIds(release)
+  const ownerUserId = getReleaseOwnerUserId(release)
+  const dimensionIds = await getReleaseDimensionIds(release)
+  if (userIds.length !== 2 || !ownerUserId || dimensionIds.length === 0) return false
+
+  const originalScores = await prisma.score.findMany({
+    where: {
+      feedbackItem: { batchId: release.batchId },
+      userId: { in: userIds },
+      dimensionId: { in: dimensionIds },
+      isReconciled: false,
+    },
+    select: {
+      feedbackItemId: true,
+      dimensionId: true,
+      userId: true,
+      value: true,
+    },
   })
-  await autoReconcileAgreedScores(batchId)
+
+  const originalGroups = new Map<string, typeof originalScores>()
+  for (const score of originalScores) {
+    const key = `${score.feedbackItemId}::${score.dimensionId}`
+    if (!originalGroups.has(key)) originalGroups.set(key, [])
+    originalGroups.get(key)!.push(score)
+  }
+
+  const discrepantKeys = new Set<string>()
+  for (const [key, group] of originalGroups) {
+    if (group.length !== 2) continue
+    if (group[0].userId === group[1].userId) continue
+    if (group[0].value !== group[1].value) {
+      discrepantKeys.add(key)
+    }
+  }
+
+  const reconciledScores = await prisma.score.findMany({
+    where: {
+      feedbackItem: { batchId: release.batchId },
+      userId: ownerUserId,
+      dimensionId: { in: dimensionIds },
+      isReconciled: true,
+    },
+    select: {
+      feedbackItemId: true,
+      dimensionId: true,
+    },
+  })
+  const reconciledKeys = new Set(
+    reconciledScores.map(
+      (score) => `${score.feedbackItemId}::${score.dimensionId}`
+    )
+  )
+
+  const openEscalations = await prisma.escalation.count({
+    where: {
+      teamReleaseId: releaseId,
+      resolvedAt: null,
+    },
+  })
+
+  const unresolvedDiscrepancies = Array.from(discrepantKeys).filter(
+    (key) => !reconciledKeys.has(key)
+  ).length
+
+  if (unresolvedDiscrepancies > 0 || openEscalations > 0) {
+    return false
+  }
+
+  await prisma.teamBatchRelease.update({
+    where: { id: releaseId },
+    data: { status: 'COMPLETE' },
+  })
+  await syncBatchStatus(release.batchId)
   return true
 }
