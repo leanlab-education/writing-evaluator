@@ -91,9 +91,10 @@ model RubricDimension {
   label          String
   description    String?
   sortOrder      Int
-  scaleMin       Int     @default(1)
-  scaleMax       Int     @default(3)
-  scoreLabelJson String? // JSON: {"1":"Not Present","2":"Unclear","3":"Present"}
+  scaleMin       Int     @default(0)
+  scaleMax       Int     @default(1)
+  scoreLabelJson String? // JSON keyed by score value: {"0":{"label":"Does Not Meet Criterion"},"1":{"label":"Meets Criterion"}}
+  guidanceJson   String? // JSON: prompt + ordered content blocks for full-rubric display
 
   project        Project                  @relation(fields: [projectId], references: [id], onDelete: Cascade)
   scores         Score[]

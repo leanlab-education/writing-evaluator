@@ -272,19 +272,14 @@ export function AdjudicateClient({ userName }: { userName: string }) {
                           </div>
                           <div className="flex items-center gap-2">
                             <span
-                              className={`inline-flex size-9 items-center justify-center rounded-lg border-2 text-base font-bold ${getScoreColor(
+                              className={`inline-flex rounded-lg border-2 px-2.5 py-1 text-xs font-medium ${getScoreColor(
                                 coder.value,
                                 item.dimension.scaleMin,
                                 item.dimension.scaleMax
                               )}`}
                             >
-                              {coder.value}
+                              {scoreLabels[coder.value]?.label ?? coder.value}
                             </span>
-                            {scoreLabels[coder.value] && (
-                              <span className="text-xs text-muted-foreground">
-                                {scoreLabels[coder.value].label}
-                              </span>
-                            )}
                           </div>
                           {coder.notes && coder.notes.trim() && (
                             <div className="mt-2 whitespace-pre-wrap rounded bg-background/60 p-2 text-xs text-foreground">
@@ -331,7 +326,7 @@ export function AdjudicateClient({ userName }: { userName: string }) {
                                   },
                                 }))
                               }
-                              className={`flex flex-col items-center rounded-xl border-2 px-3 py-2 text-center transition-all duration-200 ${
+                              className={`rounded-xl border-2 px-4 py-3 text-left text-sm font-medium transition-all duration-200 ${
                                 isSelected
                                   ? getSelectedScoreColor(
                                       val,
@@ -341,9 +336,8 @@ export function AdjudicateClient({ userName }: { userName: string }) {
                                   : `${getScoreColor(val, item.dimension.scaleMin, item.dimension.scaleMax)} hover:shadow-md`
                               }`}
                             >
-                              <span className="text-lg font-bold">{val}</span>
                               {label && (
-                                <span className="mt-0.5 text-[10px] font-medium leading-tight">
+                                <span className="block leading-tight">
                                   {label.label}
                                 </span>
                               )}

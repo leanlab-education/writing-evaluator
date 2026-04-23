@@ -15,6 +15,14 @@ import { Textarea } from '@/components/ui/textarea'
 import { Progress } from '@/components/ui/progress'
 import { Badge } from '@/components/ui/badge'
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog'
+import {
   ChevronLeft,
   ChevronRight,
   CheckCircle,
@@ -22,6 +30,7 @@ import {
   Loader2,
   AlertTriangle,
   ArrowLeft,
+  FileText,
 } from 'lucide-react'
 import { AppShell } from '@/components/app-shell'
 import {
@@ -43,6 +52,7 @@ interface RubricDimension {
   scaleMin: number
   scaleMax: number
   scoreLabelJson: string | null
+  guidanceJson: string | null
 }
 
 interface FeedbackItem {
@@ -79,6 +89,17 @@ interface ExistingScore {
   notes: string | null
 }
 
+interface RubricContentBlock {
+  type: 'paragraph' | 'bullet' | 'label'
+  text: string
+}
+
+interface RubricDimensionGuidance {
+  prompt: string
+  meets: RubricContentBlock[]
+  doesNotMeet: RubricContentBlock[]
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -91,6 +112,17 @@ function parseScoreLabels(
     return JSON.parse(json)
   } catch {
     return {}
+  }
+}
+
+function parseGuidance(
+  json: string | null
+): RubricDimensionGuidance | null {
+  if (!json) return null
+  try {
+    return JSON.parse(json)
+  } catch {
+    return null
   }
 }
 
@@ -123,6 +155,7 @@ export function EvaluateClient({
 
   // Data
   const [project, setProject] = useState<ProjectData | null>(null)
+  const [fullRubric, setFullRubric] = useState<RubricDimension[]>([])
   const [items, setItems] = useState<FeedbackItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -190,8 +223,15 @@ export function EvaluateClient({
         setTeamInfo(team)
       }
 
+      // Preserve the full project rubric for the reference drawer, even when
+      // team-scored batches only expose a subset for active scoring.
+      const allRubric = [...projectData.rubric].sort(
+        (a, b) => a.sortOrder - b.sortOrder
+      )
+      setFullRubric(allRubric)
+
       // Sort rubric by sortOrder
-      projectData.rubric.sort((a, b) => a.sortOrder - b.sortOrder)
+      projectData.rubric = allRubric
 
       // Filter rubric to only the evaluator's team dimensions
       // UNLESS this is a training batch (show all criteria)
@@ -726,11 +766,132 @@ export function EvaluateClient({
         <div className="flex w-full flex-col gap-4 lg:w-1/2">
           <Card>
             <CardHeader>
-              <CardTitle>Score This Feedback</CardTitle>
-              <CardDescription>
-                Rate each dimension below. All dimensions must be scored before
-                continuing.
-              </CardDescription>
+              <div className="flex items-start justify-between gap-3">
+                <div className="space-y-1">
+                  <CardTitle>Score This Feedback</CardTitle>
+                  <CardDescription>
+                    Rate each criterion below. All criteria must be scored
+                    before continuing.
+                  </CardDescription>
+                </div>
+                <Dialog>
+                  <DialogTrigger
+                    render={<Button variant="outline" size="sm" />}
+                  >
+                    <FileText className="size-4" />
+                    View Full Rubric
+                  </DialogTrigger>
+                  <DialogContent
+                    className="top-0 right-0 left-auto h-screen w-full max-w-2xl translate-x-0 translate-y-0 gap-0 rounded-none border-l p-0 sm:max-w-2xl"
+                    showCloseButton
+                  >
+                    <DialogHeader className="border-b px-6 py-5">
+                      <DialogTitle>Full Rubric</DialogTitle>
+                      <DialogDescription>
+                        Reference all rubric criteria and their answer-option
+                        definitions while you score.
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="flex-1 overflow-y-auto px-6 py-5">
+                      <div className="mb-5 rounded-xl border bg-muted/30 p-4 text-sm">
+                        <div className="font-medium text-foreground">
+                          Rubric V10, April 2026
+                        </div>
+                        <div className="mt-2 space-y-1 text-muted-foreground">
+                          <p>Student work:</p>
+                          <p>Teacher feedback:</p>
+                        </div>
+                      </div>
+                      <div className="space-y-4">
+                        {fullRubric.map((dim) => {
+                          const scoreLabels = parseScoreLabels(dim.scoreLabelJson)
+                          const guidance = parseGuidance(dim.guidanceJson)
+                          const scaleOptions: number[] = []
+                          for (let v = dim.scaleMin; v <= dim.scaleMax; v++) {
+                            scaleOptions.push(v)
+                          }
+
+                          return (
+                            <Card key={dim.id}>
+                              <CardHeader className="pb-3">
+                                <CardTitle className="text-base">
+                                  {dim.label}
+                                </CardTitle>
+                                {(guidance?.prompt || dim.description) && (
+                                  <CardDescription>
+                                    {guidance?.prompt || dim.description}
+                                  </CardDescription>
+                                )}
+                              </CardHeader>
+                              <CardContent className="grid gap-3 lg:grid-cols-2">
+                                {scaleOptions.map((val) => {
+                                  const label = scoreLabels[val]
+                                  const content =
+                                    val === dim.scaleMin
+                                      ? guidance?.doesNotMeet
+                                      : guidance?.meets
+                                  if (!label) return null
+
+                                  return (
+                                    <div
+                                      key={`${dim.id}-${val}`}
+                                      className={`rounded-xl border px-4 py-3 ${getScoreColor(
+                                        val,
+                                        dim.scaleMin,
+                                        dim.scaleMax
+                                      )}`}
+                                    >
+                                      <div className="text-sm font-semibold">
+                                        {label.label}
+                                      </div>
+                                      {content && content.length > 0 && (
+                                        <div className="mt-3 space-y-2 text-sm leading-relaxed">
+                                          {content.map((block, index) => {
+                                            if (block.type === 'label') {
+                                              return (
+                                                <div
+                                                  key={`${dim.id}-${val}-${index}`}
+                                                  className="text-xs font-semibold uppercase tracking-wide text-foreground/80"
+                                                >
+                                                  {block.text}
+                                                </div>
+                                              )
+                                            }
+
+                                            if (block.type === 'bullet') {
+                                              return (
+                                                <div
+                                                  key={`${dim.id}-${val}-${index}`}
+                                                  className="flex items-start gap-2"
+                                                >
+                                                  <span className="mt-1 size-1.5 shrink-0 rounded-full bg-current" />
+                                                  <span>{block.text}</span>
+                                                </div>
+                                              )
+                                            }
+
+                                            return (
+                                              <p
+                                                key={`${dim.id}-${val}-${index}`}
+                                              >
+                                                {block.text}
+                                              </p>
+                                            )
+                                          })}
+                                        </div>
+                                      )}
+                                    </div>
+                                  )
+                                })}
+                              </CardContent>
+                            </Card>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  </DialogContent>
+                </Dialog>
+              </div>
             </CardHeader>
             <CardContent className="flex flex-col gap-6">
               {rubric.map((dim) => {
@@ -766,7 +927,7 @@ export function EvaluateClient({
                           <button
                             key={val}
                             onClick={() => handleScoreChange(dim.id, val)}
-                            className={`flex flex-col items-center rounded-xl border-2 px-3 py-2 text-center transition-all duration-200 ${
+                            className={`rounded-xl border-2 px-4 py-3 text-left text-sm font-medium transition-all duration-200 ${
                               isSelected
                                 ? getSelectedScoreColor(
                                     val,
@@ -776,9 +937,8 @@ export function EvaluateClient({
                                 : `${getScoreColor(val, dim.scaleMin, dim.scaleMax)} hover:shadow-md`
                             }`}
                           >
-                            <span className="text-lg font-bold">{val}</span>
                             {label && (
-                              <span className="mt-0.5 text-[10px] font-medium leading-tight">
+                              <span className="block leading-tight">
                                 {label.label}
                               </span>
                             )}
@@ -870,7 +1030,7 @@ export function EvaluateClient({
 
               {!allDimensionsScored && (
                 <p className="text-center text-xs text-muted-foreground">
-                  Score all {rubric.length} dimensions to continue
+                  Score all {rubric.length} criteria to continue
                 </p>
               )}
             </CardContent>

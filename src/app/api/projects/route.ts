@@ -56,6 +56,7 @@ export async function POST(request: Request) {
           scaleMin: dim.scaleMin,
           scaleMax: dim.scaleMax,
           scoreLabelJson: JSON.stringify(dim.scoreLabels),
+          guidanceJson: JSON.stringify(dim.guidance),
         })),
       },
     },

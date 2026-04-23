@@ -634,19 +634,15 @@ export function ReconcileClient({
                         </div>
                         <div className="flex items-center gap-2">
                           <span
-                            className={`inline-flex size-8 items-center justify-center rounded-lg border-2 text-sm font-bold ${getScoreColor(
+                            className={`inline-flex rounded-lg border-2 px-2.5 py-1 text-xs font-medium ${getScoreColor(
                               disc.evaluatorA.value,
                               disc.scaleMin,
                               disc.scaleMax
                             )}`}
                           >
-                            {disc.evaluatorA.value}
+                            {scoreLabels[disc.evaluatorA.value]?.label ??
+                              disc.evaluatorA.value}
                           </span>
-                          {scoreLabels[disc.evaluatorA.value] && (
-                            <span className="text-xs text-muted-foreground">
-                              {scoreLabels[disc.evaluatorA.value].label}
-                            </span>
-                          )}
                         </div>
                       </div>
 
@@ -656,19 +652,15 @@ export function ReconcileClient({
                         </div>
                         <div className="flex items-center gap-2">
                           <span
-                            className={`inline-flex size-8 items-center justify-center rounded-lg border-2 text-sm font-bold ${getScoreColor(
+                            className={`inline-flex rounded-lg border-2 px-2.5 py-1 text-xs font-medium ${getScoreColor(
                               disc.evaluatorB.value,
                               disc.scaleMin,
                               disc.scaleMax
                             )}`}
                           >
-                            {disc.evaluatorB.value}
+                            {scoreLabels[disc.evaluatorB.value]?.label ??
+                              disc.evaluatorB.value}
                           </span>
-                          {scoreLabels[disc.evaluatorB.value] && (
-                            <span className="text-xs text-muted-foreground">
-                              {scoreLabels[disc.evaluatorB.value].label}
-                            </span>
-                          )}
                         </div>
                       </div>
                     </div>
@@ -707,12 +699,12 @@ export function ReconcileClient({
                               const label = scoreLabels[val]
                               const isSelected = finalValue === val
                               return (
-                                <button
+                              <button
                                   key={val}
                                   onClick={() =>
                                     handleFinalScoreChange(disc.dimensionId, val)
                                   }
-                                  className={`flex flex-col items-center rounded-xl border-2 px-3 py-2 text-center transition-all duration-200 ${
+                                  className={`rounded-xl border-2 px-4 py-3 text-left text-sm font-medium transition-all duration-200 ${
                                     isSelected
                                       ? getSelectedScoreColor(
                                           val,
@@ -722,9 +714,8 @@ export function ReconcileClient({
                                       : `${getScoreColor(val, disc.scaleMin, disc.scaleMax)} hover:shadow-md`
                                   }`}
                                 >
-                                  <span className="text-lg font-bold">{val}</span>
                                   {label && (
-                                    <span className="mt-0.5 text-[10px] font-medium leading-tight">
+                                    <span className="block leading-tight">
                                       {label.label}
                                     </span>
                                   )}
@@ -826,7 +817,7 @@ export function ReconcileClient({
                   reconciled scores in the export.
                 </p>
                 <Textarea
-                  placeholder="e.g. Agreed a 2 on Criterion 1 because the feedback hedges the claim..."
+                  placeholder="e.g. Agreed it was unclear because the feedback points to a problem but not a usable next step..."
                   value={currentState?.notes ?? ''}
                   onChange={(e) => handleNotesChange(e.target.value)}
                   className="mt-2 text-sm"

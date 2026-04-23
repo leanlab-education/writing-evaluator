@@ -744,7 +744,7 @@ export function ProjectDetailClient({
 
           {/* ============== RUBRIC TAB ============== */}
           <TabsContent value="rubric" className="mt-6 space-y-4">
-            <h2 className="text-lg font-semibold">Rubric Dimensions</h2>
+            <h2 className="text-lg font-semibold">Rubric Criteria</h2>
             <p className="text-sm text-muted-foreground">
               The scoring rubric applied to each feedback item. Editing is not
               available in this version.
@@ -752,7 +752,7 @@ export function ProjectDetailClient({
 
             {project.rubric.length === 0 ? (
               <div className="py-8 text-center text-sm text-muted-foreground">
-                No rubric dimensions configured.
+                No rubric criteria configured.
               </div>
             ) : (
               <div className="space-y-4">
@@ -761,32 +761,22 @@ export function ProjectDetailClient({
                   return (
                     <Card key={dim.id}>
                       <CardHeader className="pb-2">
-                        <div className="flex items-center gap-2">
-                          <CardTitle className="text-base">
-                            {dim.label}
-                          </CardTitle>
-                          <Badge variant="outline" className="text-xs">
-                            {dim.key}
-                          </Badge>
-                        </div>
+                        <CardTitle className="text-base">{dim.label}</CardTitle>
                         {dim.description && (
                           <CardDescription>{dim.description}</CardDescription>
                         )}
                       </CardHeader>
                       <CardContent>
                         <p className="mb-2 text-xs font-medium text-muted-foreground">
-                          Scale: {dim.scaleMin} - {dim.scaleMax}
+                          Options
                         </p>
                         {Object.keys(labels).length > 0 && (
                           <div className="space-y-1">
-                            {Object.entries(labels).map(([score, info]) => (
+                            {Object.entries(labels).map(([, info]) => (
                               <div
-                                key={score}
+                                key={info.label}
                                 className="flex items-start gap-2 text-sm"
                               >
-                                <Badge variant="outline" className="mt-0.5 shrink-0">
-                                  {score}
-                                </Badge>
                                 <div>
                                   <span className="font-medium">
                                     {info.label}
@@ -876,7 +866,7 @@ export function ProjectDetailClient({
                 <CardContent>
                   <p className="mb-4 text-xs text-muted-foreground">
                     Columns: feedback_ID, evaluator_email,{' '}
-                    {project.rubric.map((d) => d.key).join(', ')}, notes,
+                    {project.rubric.map((d) => d.label).join(', ')}, notes,
                     feedback_source, timestamp
                   </p>
                   <Button
@@ -901,7 +891,7 @@ export function ProjectDetailClient({
                 <CardContent>
                   <p className="mb-4 text-xs text-muted-foreground">
                     Columns: feedback_ID, evaluator_email,{' '}
-                    {project.rubric.map((d) => d.key).join(', ')}, notes,
+                    {project.rubric.map((d) => d.label).join(', ')}, notes,
                     feedback_source, timestamp
                   </p>
                   <Button
