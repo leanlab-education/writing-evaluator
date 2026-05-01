@@ -22,18 +22,32 @@ interface ReleaseWithContext {
 }
 
 export function getExpectedReleaseUserIds(release: ReleaseWithContext): string[] {
+  // Every team member is assigned to the release.
+  //   - TRAINING & double-scored: every member scores every item.
+  //   - Non-double-scored regular: every member scores half the items (split by slotIndex).
+  return release.team.members.map((member) => member.userId)
+}
+
+/**
+ * How many scores are expected per (item × dimension) for this release.
+ *
+ *   - TRAINING:                 members.length (all members score everything)
+ *   - Double-scored regular:    2 (both members score everything)
+ *   - Non-double-scored regular: 1 (each item scored once, split across members)
+ */
+export function getExpectedScoresPerItemPerDimension(
+  release: ReleaseWithContext
+): number {
   const batchType = release.batch?.type ?? release.batchType
   const isDoubleScored = release.batch?.isDoubleScored ?? release.isDoubleScored
 
   if (batchType === 'TRAINING') {
-    return release.team.members.map((member) => member.userId)
+    return release.team.members.length
   }
-
   if (isDoubleScored) {
-    return release.team.members.map((member) => member.userId)
+    return release.team.members.length >= 2 ? 2 : release.team.members.length
   }
-
-  return release.scorerUserId ? [release.scorerUserId] : []
+  return release.team.members.length > 0 ? 1 : 0
 }
 
 export function releaseNeedsReconciliation(release: ReleaseWithContext): boolean {
@@ -149,6 +163,9 @@ export async function syncBatchAssignmentsForRelease(releaseId: string) {
         batchId: release.batch.id,
         userId,
         teamReleaseId: releaseId,
+        // Only double-scored uses the PRIMARY/DOUBLE distinction. For
+        // non-double-scored regular the two members each own half the items,
+        // so both are PRIMARY for their own slot.
         scoringRole:
           release.batch.isDoubleScored && index > 0 ? 'DOUBLE' : 'PRIMARY',
       })),

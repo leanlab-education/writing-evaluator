@@ -126,6 +126,7 @@ model FeedbackItem {
   batchId        String?        // FK to Batch (null = unassigned to batch)
   importId       String?        // FK to Import (which upload brought this item in)
   displayOrder   Int?
+  slotIndex      Int?           // 0 or 1 — which teammate slot scores this item in non-double-scored regular batches
   createdAt      DateTime       @default(now())
 
   project     Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)

@@ -2,6 +2,7 @@ import { prisma } from '@/lib/db'
 import {
   getExpectedReleaseDimensionIds,
   getExpectedReleaseUserIds,
+  getExpectedScoresPerItemPerDimension,
   getReleaseOwnerUserId,
   releaseNeedsReconciliation,
   syncBatchStatus,
@@ -64,7 +65,8 @@ export async function isReleaseFullyScored(releaseId: string): Promise<boolean> 
   })
   if (itemCount === 0) return false
 
-  const expectedCount = itemCount * userIds.length * dimensionIds.length
+  const scoresPerItemPerDim = getExpectedScoresPerItemPerDimension(release)
+  const expectedCount = itemCount * dimensionIds.length * scoresPerItemPerDim
   const actualCount = await prisma.score.count({
     where: {
       feedbackItem: { batchId: release.batchId },

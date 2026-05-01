@@ -435,25 +435,10 @@ export function BatchCreator({
                                       : 'Not enough scores yet'}
                                   </span>
                                 )}
-                                {batch.type === 'REGULAR' && !batch.isDoubleScored && (
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-muted-foreground">Scorer:</span>
-                                    <select
-                                      className="flex h-6 rounded-md border border-input bg-background px-2 py-0.5 text-xs shadow-sm transition-all duration-200"
-                                      value={release.scorerUserId || ''}
-                                      onChange={(event) =>
-                                        handleUpdateTeamRelease(batch.id, release.id, {
-                                          scorerUserId: event.target.value || null,
-                                        })
-                                      }
-                                    >
-                                      {release.members.map((member) => (
-                                        <option key={member.id} value={member.id}>
-                                          {member.name || member.email}
-                                        </option>
-                                      ))}
-                                    </select>
-                                  </div>
+                                {batch.type === 'REGULAR' && !batch.isDoubleScored && release.members.length >= 2 && (
+                                  <span className="text-muted-foreground">
+                                    Items split: ~{Math.ceil(batch.itemCount / 2)}/{Math.floor(batch.itemCount / 2)} between teammates
+                                  </span>
                                 )}
                                 <label className="flex cursor-pointer items-center gap-1.5">
                                   <input

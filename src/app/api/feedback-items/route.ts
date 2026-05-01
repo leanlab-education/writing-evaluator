@@ -20,6 +20,10 @@ export async function GET(request: NextRequest) {
   const batchId = request.nextUrl.searchParams.get('batchId')
   const isAdmin = session.user.role === 'ADMIN'
 
+  // For non-double-scored regular batches, items are split between teammates
+  // by slotIndex. We need the user's slot to filter which items they see.
+  let slotFilter: number | null = null
+
   // Evaluators can only access projects they're assigned to
   if (!isAdmin) {
     const membership = await prisma.projectEvaluator.findUnique({
@@ -36,11 +40,41 @@ export async function GET(request: NextRequest) {
           userId: session.user.id,
           OR: [{ teamReleaseId: null }, { teamRelease: { isVisible: true } }],
         },
-        select: { id: true },
+        select: {
+          id: true,
+          teamRelease: {
+            select: {
+              id: true,
+              batch: { select: { type: true, isDoubleScored: true } },
+              team: {
+                select: {
+                  members: {
+                    select: { userId: true },
+                    orderBy: { user: { email: 'asc' } },
+                  },
+                },
+              },
+            },
+          },
+        },
       })
 
       if (!assignment) {
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      }
+
+      const release = assignment.teamRelease
+      if (
+        release &&
+        release.batch.type === 'REGULAR' &&
+        !release.batch.isDoubleScored &&
+        release.team.members.length >= 2
+      ) {
+        const sortedUserIds = release.team.members.map((m) => m.userId)
+        const userSlot = sortedUserIds.indexOf(session.user.id)
+        if (userSlot !== -1) {
+          slotFilter = userSlot
+        }
       }
     }
   }
@@ -50,6 +84,7 @@ export async function GET(request: NextRequest) {
     where: {
       projectId,
       ...(batchId ? { batchId } : {}),
+      ...(slotFilter !== null ? { slotIndex: slotFilter } : {}),
     },
     select: {
       id: true,

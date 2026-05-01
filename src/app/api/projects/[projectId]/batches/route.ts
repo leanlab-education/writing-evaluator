@@ -4,8 +4,10 @@ import { compareFeedbackIds } from '@/lib/feedback-id'
 import { computeBatchIRRSummary } from '@/lib/irr'
 import {
   getExpectedReleaseUserIds,
+  getExpectedScoresPerItemPerDimension,
   syncBatchAssignmentsForRelease,
 } from '@/lib/team-batch-releases'
+import { assignBatchSlots } from '@/lib/batch-slots'
 import { NextRequest, NextResponse } from 'next/server'
 
 interface BatchRangeInput {
@@ -173,11 +175,13 @@ export async function GET(
 
       const teamReleases = await Promise.all(
         batch.teamReleases.map(async (release) => {
-          const expectedUserIds = getExpectedReleaseUserIds({
+          const releaseContext = {
             ...release,
             isDoubleScored: batch.isDoubleScored,
             batchType: batch.type,
-          })
+          }
+          const expectedUserIds = getExpectedReleaseUserIds(releaseContext)
+          const scoresPerItemPerDim = getExpectedScoresPerItemPerDimension(releaseContext)
           const dimensionIds =
             batch.type === 'TRAINING'
               ? projectDimensions.map((dimension) => dimension.id)
@@ -185,7 +189,7 @@ export async function GET(
           const expectedScoreCount =
             batch._count.feedbackItems *
             dimensionIds.length *
-            expectedUserIds.length
+            scoresPerItemPerDim
 
           const actualScoreCount =
             expectedScoreCount > 0
@@ -570,6 +574,13 @@ export async function POST(
     data: { batchId: batch.id },
   })
 
+  // Non-double-scored regular: shuffle items into slots A/B at the batch level
+  // (one shuffle, consistent across all team releases). Double-scored and
+  // training don't use slots — every member scores everything.
+  if (type === 'REGULAR' && !isDoubleScored) {
+    await assignBatchSlots(batch.id)
+  }
+
   if (type === 'REGULAR' || type === 'TRAINING') {
     const teams = await prisma.evaluatorTeam.findMany({
       where: { projectId },
@@ -596,12 +607,9 @@ export async function POST(
           teamId: team.id,
           isVisible: visibleToTeams,
           status: visibleToTeams ? 'SCORING' : 'DRAFT',
-          scorerUserId:
-            type === 'TRAINING'
-              ? null
-              : isDoubleScored
-                ? null
-                : (team.members[0]?.userId ?? null),
+          // scorerUserId is now legacy — non-double-scored regular splits items
+          // across both members via slotIndex. Left null going forward.
+          scorerUserId: null,
         },
       })
       releaseIds.push(release.id)

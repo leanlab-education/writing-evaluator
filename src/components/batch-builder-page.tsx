@@ -281,7 +281,8 @@ export function BatchBuilderPage({
                       <div className="font-medium">Double scored</div>
                       <p className="text-muted-foreground">
                         When enabled, both members of each team score the same items
-                        for that team&apos;s criteria.
+                        for that team&apos;s criteria. When disabled, items are
+                        randomized and split evenly between the two teammates.
                       </p>
                     </div>
                   </label>

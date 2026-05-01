@@ -64,11 +64,11 @@ doppler run -p writing-evaluator -c dev -- <command>
 User              — email, hashedPassword, role (ADMIN | EVALUATOR)
 Project           — name, status (display-only, derived from batch states)
 RubricDimension   — per-project scoring criteria with configurable scales
-FeedbackItem      — imported from CSV (studentText, feedbackText, feedbackSource, teacherId, conjunctionId, optimal, feedbackType)
+FeedbackItem      — imported from CSV (studentText, feedbackText, feedbackSource, teacherId, conjunctionId, optimal, feedbackType, slotIndex)
 ProjectEvaluator  — M:M join between projects and evaluators
 Assignment        — which evaluator scores which items
-Batch             — groups of items with status (DRAFT → SCORING → RECONCILING → COMPLETE), type (REGULAR | TRAINING)
-BatchAssignment   — evaluator ↔ batch with scoringRole (PRIMARY | DOUBLE)
+Batch             — groups of items with status (DRAFT → SCORING → RECONCILING → COMPLETE), type (REGULAR | TRAINING), isDoubleScored
+BatchAssignment   — annotator ↔ batch with scoringRole (PRIMARY | DOUBLE), one row per annotator who scores anything in the batch
 EvaluatorTeam     — pairs of evaluators assigned to specific rubric criteria
 EvaluatorTeamMember    — team ↔ user join
 EvaluatorTeamDimension — team ↔ dimension join
@@ -80,6 +80,16 @@ Key relationships:
 - `feedbackSource` is an enum: `AI` or `HUMAN` — hidden during scoring (blinded), revealed only on export
 - Rubric dimensions are rows in the DB, not hardcoded columns — fully configurable per project
 - `Score` has a unique constraint on `[feedbackItemId, userId, dimensionId, isReconciled]`
+- `FeedbackItem.slotIndex` (0 or 1) is set on batch creation for non-double-scored regular batches. One CSPRNG shuffle per batch splits items ~50/50; the same slot label applies across every team release in the batch (item with slot 0 always goes to each team's slot-A member, item with slot 1 to slot-B).
+
+### Scoring assignment rules (per release)
+
+For every team release in a batch:
+- **Training**: every team member scores every item against every project criterion.
+- **Double-scored regular**: both team members score every item against the team's criteria. Reconciliation handles disagreement.
+- **Non-double-scored regular**: both team members are assigned to the batch (both have `BatchAssignment` rows), but each only sees their slot's half of the items via `FeedbackItem.slotIndex`. No reconciliation — each item gets one score per criterion.
+
+`TeamBatchRelease.scorerUserId` is legacy. New non-double-scored regular batches leave it null and rely on the slot split. The field is preserved on existing rows but unused by the UI.
 
 ## Auth
 
