@@ -20,9 +20,13 @@ export async function GET(request: NextRequest) {
   const batchId = request.nextUrl.searchParams.get('batchId')
   const isAdmin = session.user.role === 'ADMIN'
 
-  // For non-double-scored regular batches, items are split between teammates
-  // by slotIndex. We need the user's slot to filter which items they see.
+  // Per-batch slot filter: when an annotator opens a non-double-scored regular
+  // batch, they only see their slot's half of the items.
   let slotFilter: number | null = null
+  // Cross-batch path (no batchId): collect per-batch conditions so the user
+  // only sees items from batches they're actually assigned to, with the slot
+  // filter applied where it matters.
+  let crossBatchOr: { batchId: string; slotIndex?: number }[] | null = null
 
   // Evaluators can only access projects they're assigned to
   if (!isAdmin) {
@@ -76,6 +80,50 @@ export async function GET(request: NextRequest) {
           slotFilter = userSlot
         }
       }
+    } else {
+      // No batchId: build per-batch conditions across the user's batches in
+      // this project. Without this, evaluators would see every item in the
+      // project (incl. batches they're not assigned to and items their
+      // teammate is responsible for).
+      const accessibleAssignments = await prisma.batchAssignment.findMany({
+        where: {
+          userId: session.user.id,
+          batch: { projectId, isHidden: false },
+          OR: [{ teamReleaseId: null }, { teamRelease: { isVisible: true } }],
+        },
+        select: {
+          batch: { select: { id: true, type: true, isDoubleScored: true } },
+          teamRelease: {
+            select: {
+              team: {
+                select: {
+                  members: {
+                    select: { userId: true },
+                    orderBy: { user: { email: 'asc' } },
+                  },
+                },
+              },
+            },
+          },
+        },
+      })
+      crossBatchOr = accessibleAssignments.map((a) => {
+        const isSlotSplit =
+          a.batch.type === 'REGULAR' &&
+          !a.batch.isDoubleScored &&
+          a.teamRelease &&
+          a.teamRelease.team.members.length >= 2
+        if (isSlotSplit) {
+          const ids = a.teamRelease!.team.members.map((m) => m.userId)
+          const slot = ids.indexOf(session.user.id)
+          return { batchId: a.batch.id, slotIndex: slot >= 0 ? slot : -1 }
+        }
+        return { batchId: a.batch.id }
+      })
+      // No accessible batches → return empty list rather than the whole project.
+      if (crossBatchOr.length === 0) {
+        return NextResponse.json([])
+      }
     }
   }
 
@@ -85,6 +133,7 @@ export async function GET(request: NextRequest) {
       projectId,
       ...(batchId ? { batchId } : {}),
       ...(slotFilter !== null ? { slotIndex: slotFilter } : {}),
+      ...(crossBatchOr ? { OR: crossBatchOr } : {}),
     },
     select: {
       id: true,

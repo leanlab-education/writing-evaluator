@@ -165,12 +165,23 @@ export async function GET(
           scoreGroups.get(key)!.push(score.value)
         }
         discrepancyCount = 0
-        for (const values of scoreGroups.values()) {
-          if (values.length === 2 && values[0] !== values[1]) discrepancyCount++
+        const discrepantKeys = new Set<string>()
+        for (const [key, values] of scoreGroups) {
+          if (values.length === 2 && values[0] !== values[1]) {
+            discrepancyCount++
+            discrepantKeys.add(key)
+          }
         }
-        reconciledCount = await prisma.score.count({
+        // Only count reconciled scores that resolved an actual discrepancy —
+        // auto-reconciled agreed pairs are also isReconciled=true but they
+        // shouldn't count toward "X / Y reconciled" progress.
+        const reconciled = await prisma.score.findMany({
           where: { feedbackItem: { batchId: batch.id }, isReconciled: true },
+          select: { feedbackItemId: true, dimensionId: true },
         })
+        reconciledCount = reconciled.filter((r) =>
+          discrepantKeys.has(`${r.feedbackItemId}::${r.dimensionId}`)
+        ).length
       }
 
       const teamReleases = await Promise.all(

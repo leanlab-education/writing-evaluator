@@ -74,6 +74,35 @@ export function getReleaseOwnerUserId(release: ReleaseWithContext): string | nul
   return release.team.members[0]?.userId ?? null
 }
 
+/**
+ * True when this release splits items by slotIndex between two team members
+ * (non-double-scored regular with ≥2 members). Training and double-scored
+ * batches do not split — every member scores everything.
+ */
+export function isSlotSplitRelease(release: ReleaseWithContext): boolean {
+  const batchType = release.batch?.type ?? release.batchType
+  const isDoubleScored = release.batch?.isDoubleScored ?? release.isDoubleScored
+  return (
+    batchType === 'REGULAR' &&
+    !isDoubleScored &&
+    release.team.members.length >= 2
+  )
+}
+
+/**
+ * Returns 0/1 for the given user on a slot-split release (based on the team's
+ * email-asc ordering). Returns null if the user isn't a team member or the
+ * release doesn't split.
+ */
+export function getReleaseUserSlotIndex(
+  release: ReleaseWithContext,
+  userId: string
+): number | null {
+  if (!isSlotSplitRelease(release)) return null
+  const idx = release.team.members.findIndex((m) => m.userId === userId)
+  return idx === -1 ? null : idx
+}
+
 export async function syncBatchStatus(batchId: string) {
   const batch = await prisma.batch.findUnique({
     where: { id: batchId },

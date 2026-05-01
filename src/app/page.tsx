@@ -2,6 +2,7 @@ import { auth } from '@/lib/auth'
 import { redirect } from 'next/navigation'
 import { prisma } from '@/lib/db'
 import { EvaluatorDashboard } from '@/components/evaluator-dashboard'
+import { getReleaseUserSlotIndex, isSlotSplitRelease } from '@/lib/team-batch-releases'
 
 export default async function HomePage() {
   const session = await auth()
@@ -22,28 +23,9 @@ export default async function HomePage() {
           status: true,
         },
       },
-      _count: {
-        select: { assignments: true },
-      },
     },
     orderBy: { createdAt: 'desc' },
   })
-
-  // Get completed assignment counts
-  const completedCounts = await prisma.assignment.groupBy({
-    by: ['evaluatorId'],
-    where: {
-      evaluatorId: {
-        in: evaluatorProjects.map((ep) => ep.id),
-      },
-      status: 'COMPLETE',
-    },
-    _count: { id: true },
-  })
-
-  const completedMap = new Map(
-    completedCounts.map((c) => [c.evaluatorId, c._count.id])
-  )
 
   // Get batch assignments for this user
   const batchAssignments = await prisma.batchAssignment.findMany({
@@ -99,9 +81,40 @@ export default async function HomePage() {
     const pid = ba.batch.project.id
     if (!batchesByProject.has(pid)) batchesByProject.set(pid, [])
 
+    // For slot-split (non-double-scored regular) batches, the user is only
+    // responsible for their slot's items — not the whole batch. Filter the
+    // expected and scored counts accordingly so progress reflects "my items".
+    const releaseContext = ba.teamRelease
+      ? {
+          id: ba.teamRelease.id,
+          scorerUserId: null,
+          batch: {
+            id: ba.batch.id,
+            isDoubleScored: ba.batch.isDoubleScored,
+            type: ba.batch.type,
+          },
+          team: {
+            members: ba.teamRelease.team.members.map((m) => ({
+              userId: m.userId,
+            })),
+          },
+        }
+      : null
+    const slotSplit = releaseContext ? isSlotSplitRelease(releaseContext) : false
+    const userSlot =
+      releaseContext && slotSplit
+        ? getReleaseUserSlotIndex(releaseContext, session.user.id)
+        : null
+
+    const itemFilter =
+      slotSplit && userSlot !== null
+        ? { batchId: ba.batch.id, slotIndex: userSlot }
+        : { batchId: ba.batch.id }
+
+    const itemCount = await prisma.feedbackItem.count({ where: itemFilter })
     const scoredCount = await prisma.feedbackItem.count({
       where: {
-        batchId: ba.batch.id,
+        ...itemFilter,
         scores: { some: { userId: session.user.id } },
       },
     })
@@ -140,24 +153,34 @@ export default async function HomePage() {
         groups.get(key)!.push({ value: s.value, userId: s.userId })
       }
       discrepancyCount = 0
-      for (const [, values] of groups) {
+      const discrepantKeys = new Set<string>()
+      for (const [key, values] of groups) {
         if (
           values.length === 2 &&
           values[0].userId !== values[1].userId &&
           values[0].value !== values[1].value
         ) {
           discrepancyCount++
+          discrepantKeys.add(key)
         }
       }
       if (ownerUserId) {
-        reconciledCount = await prisma.score.count({
+        // Only count reconciled scores that resolved an actual discrepancy.
+        // Auto-reconciled agreed pairs also have isReconciled=true but they
+        // weren't disagreements, so they shouldn't count toward the "X / Y
+        // reconciled" progress display.
+        const reconciledScores = await prisma.score.findMany({
           where: {
             feedbackItem: { batchId: ba.batch.id },
             userId: ownerUserId,
             dimensionId: { in: dimensionIds },
             isReconciled: true,
           },
+          select: { feedbackItemId: true, dimensionId: true },
         })
+        reconciledCount = reconciledScores.filter((r) =>
+          discrepantKeys.has(`${r.feedbackItemId}::${r.dimensionId}`)
+        ).length
       }
     }
 
@@ -166,21 +189,29 @@ export default async function HomePage() {
       releaseId,
       name: ba.batch.name,
       status: releaseStatus,
-      itemCount: ba.batch._count.feedbackItems,
+      itemCount,
       scoredCount,
       discrepancyCount,
       reconciledCount,
     })
   }
 
-  const projects = evaluatorProjects.map((ep) => ({
-    id: ep.id,
-    projectId: ep.projectId,
-    project: ep.project,
-    assignmentCount: ep._count.assignments,
-    completedCount: completedMap.get(ep.id) || 0,
-    batches: batchesByProject.get(ep.projectId) || [],
-  }))
+  const projects = evaluatorProjects.map((ep) => {
+    const batches = batchesByProject.get(ep.projectId) || []
+    // Project-level totals are derived from the user's per-batch slices, not
+    // the legacy Assignment table — so the percentage matches what the user
+    // actually has to score.
+    const assignmentCount = batches.reduce((sum, b) => sum + b.itemCount, 0)
+    const completedCount = batches.reduce((sum, b) => sum + b.scoredCount, 0)
+    return {
+      id: ep.id,
+      projectId: ep.projectId,
+      project: ep.project,
+      assignmentCount,
+      completedCount,
+      batches,
+    }
+  })
 
   return (
     <EvaluatorDashboard

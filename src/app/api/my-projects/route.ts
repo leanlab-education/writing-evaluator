@@ -1,5 +1,6 @@
 import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/db'
+import { getReleaseUserSlotIndex, isSlotSplitRelease } from '@/lib/team-batch-releases'
 import { NextResponse } from 'next/server'
 
 export async function GET() {
@@ -19,28 +20,9 @@ export async function GET() {
           status: true,
         },
       },
-      _count: {
-        select: { assignments: true },
-      },
     },
     orderBy: { createdAt: 'desc' },
   })
-
-  // Get completed assignment counts
-  const completedCounts = await prisma.assignment.groupBy({
-    by: ['evaluatorId'],
-    where: {
-      evaluatorId: {
-        in: evaluatorProjects.map((ep) => ep.id),
-      },
-      status: 'COMPLETE',
-    },
-    _count: { id: true },
-  })
-
-  const completedMap = new Map(
-    completedCounts.map((c) => [c.evaluatorId, c._count.id])
-  )
 
   // Get batch assignments for this user — skip admin-hidden batches
   // so the Double-before-Independent release workflow works.
@@ -51,9 +33,20 @@ export async function GET() {
       batch: { isHidden: false },
     },
     include: {
+      teamRelease: {
+        include: {
+          team: {
+            include: {
+              members: {
+                select: { userId: true },
+                orderBy: { user: { email: 'asc' } },
+              },
+            },
+          },
+        },
+      },
       batch: {
         include: {
-          _count: { select: { feedbackItems: true } },
           project: { select: { id: true } },
         },
       },
@@ -70,13 +63,40 @@ export async function GET() {
     const pid = ba.batch.project.id
     if (!batchesByProject.has(pid)) batchesByProject.set(pid, [])
 
-    // Count items scored by this user in this batch
+    // For slot-split batches, the user is only responsible for half the items.
+    // Match `src/app/page.tsx` so the dashboard and any client refresh agree.
+    const releaseContext = ba.teamRelease
+      ? {
+          id: ba.teamRelease.id,
+          scorerUserId: null,
+          batch: {
+            id: ba.batch.id,
+            isDoubleScored: ba.batch.isDoubleScored,
+            type: ba.batch.type,
+          },
+          team: {
+            members: ba.teamRelease.team.members.map((m) => ({
+              userId: m.userId,
+            })),
+          },
+        }
+      : null
+    const slotSplit = releaseContext ? isSlotSplitRelease(releaseContext) : false
+    const userSlot =
+      releaseContext && slotSplit
+        ? getReleaseUserSlotIndex(releaseContext, session.user.id)
+        : null
+
+    const itemFilter =
+      slotSplit && userSlot !== null
+        ? { batchId: ba.batch.id, slotIndex: userSlot }
+        : { batchId: ba.batch.id }
+
+    const itemCount = await prisma.feedbackItem.count({ where: itemFilter })
     const scoredCount = await prisma.feedbackItem.count({
       where: {
-        batchId: ba.batch.id,
-        scores: {
-          some: { userId: session.user.id },
-        },
+        ...itemFilter,
+        scores: { some: { userId: session.user.id } },
       },
     })
 
@@ -84,7 +104,7 @@ export async function GET() {
       id: ba.batch.id,
       name: ba.batch.name,
       status: ba.batch.status,
-      itemCount: ba.batch._count.feedbackItems,
+      itemCount,
       scoredCount,
     })
   }
@@ -134,15 +154,8 @@ export async function GET() {
 
   const result = evaluatorProjects.map((ep) => {
     const batches = batchesByProject.get(ep.projectId) || []
-    // In batch mode, derive totals from batch sums; fall back to Assignment table
-    const assignmentCount =
-      batches.length > 0
-        ? batches.reduce((sum, b) => sum + b.itemCount, 0)
-        : ep._count.assignments
-    const completedCount =
-      batches.length > 0
-        ? batches.reduce((sum, b) => sum + b.scoredCount, 0)
-        : completedMap.get(ep.id) || 0
+    const assignmentCount = batches.reduce((sum, b) => sum + b.itemCount, 0)
+    const completedCount = batches.reduce((sum, b) => sum + b.scoredCount, 0)
     return {
       id: ep.id,
       projectId: ep.projectId,
