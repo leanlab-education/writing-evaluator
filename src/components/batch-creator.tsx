@@ -4,9 +4,11 @@ import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { ChevronRight, Loader2, Plus } from 'lucide-react'
+import { ChevronRight, Eye, EyeOff, Loader2, Plus } from 'lucide-react'
 import { batchStatusColors, batchStatusLabels } from '@/lib/status-colors'
 import { cn } from '@/lib/utils'
+import { TeamAvatar, UserAvatar } from '@/components/user-avatar'
+import { generateName } from '@/lib/generate-name'
 
 interface TeamReleaseRow {
   id: string
@@ -73,21 +75,14 @@ interface Props {
   batchesLoading: boolean
 }
 
-function getIrrBadgeClass(agreementPct: number | null, isReady: boolean) {
-  if (agreementPct == null) {
-    return 'bg-muted text-muted-foreground'
-  }
-
-  if (isReady) {
-    return 'bg-score-high-bg text-score-high-text'
-  }
-
-  if (agreementPct >= 60) {
-    return 'bg-status-active-bg text-status-active-text'
-  }
-
-  return 'bg-destructive/10 text-destructive'
+function getIrrColorClass(pct: number | null) {
+  if (pct == null) return 'text-muted-foreground'
+  if (pct >= 80) return 'text-score-high-text'
+  if (pct >= 70) return 'text-status-active-text'
+  return 'text-destructive'
 }
+
+const BATCH_GRID_COLS = '44px 1fr 84px 124px 78px 160px'
 
 export function BatchCreator({
   projectId,
@@ -209,29 +204,30 @@ export function BatchCreator({
   }
 
   return (
-      <div className="space-y-3">
+    <div className="space-y-4">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-lg font-semibold">Batches</h2>
           <p className="text-sm text-muted-foreground">
-            Create batches from feedback ID ranges, then release them to teams on
-            your schedule.
+            Create batches from feedback ID ranges, then release them to teams on your schedule.
           </p>
         </div>
         <Link
           href={`/admin/${projectId}/batches/new`}
-          className={cn(buttonVariants({ variant: 'default' }))}
+          className={cn(buttonVariants({ variant: 'default' }), 'rounded-xl')}
         >
           <Plus className="mr-2 h-4 w-4" />
           Create Batch
         </Link>
       </div>
 
+      {/* Filters */}
       {localBatches.length > 0 && (
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           <span className="text-sm font-medium text-muted-foreground">Filter:</span>
           <select
-            className="flex h-8 rounded-md border border-input bg-background px-2 py-1 text-sm shadow-sm transition-all duration-200"
+            className="h-9 rounded-xl border border-border/70 bg-background px-3 text-sm transition-all duration-200 hover:border-border focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
             value={filterActivity}
             onChange={(event) => {
               setFilterActivity(event.target.value)
@@ -246,7 +242,7 @@ export function BatchCreator({
             ))}
           </select>
           <select
-            className="flex h-8 rounded-md border border-input bg-background px-2 py-1 text-sm shadow-sm transition-all duration-200"
+            className="h-9 rounded-xl border border-border/70 bg-background px-3 text-sm transition-all duration-200 hover:border-border focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
             value={filterConjunction}
             onChange={(event) => setFilterConjunction(event.target.value)}
           >
@@ -265,22 +261,33 @@ export function BatchCreator({
         </div>
       )}
 
+      {/* Batch list */}
       {batchesLoading ? (
         <div className="flex items-center justify-center py-8">
           <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
         </div>
       ) : localBatches.length === 0 ? (
         <div className="py-8 text-center text-sm text-muted-foreground">
-          No batches created yet. Use the full-screen builder to create your first
-          batch from feedback ID ranges.
+          No batches created yet. Use the full-screen builder to create your first batch from feedback ID ranges.
         </div>
       ) : (
-        <div className="rounded-md border border-border">
+        <div className="overflow-hidden rounded-xl border border-border">
+          {/* Column headers */}
+          <div
+            className="grid items-center border-b border-border/60 bg-muted/30 px-3 py-2"
+            style={{ gridTemplateColumns: BATCH_GRID_COLS }}
+          >
+            <span />
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Batch</span>
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Type</span>
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Status</span>
+            <span className="text-center text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">IRR</span>
+            <span className="pl-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Progress</span>
+          </div>
+
           {filteredBatches.map((batch, index) => {
             const isExpanded = expandedBatches.has(batch.id)
-            const visibleReleaseCount = batch.teamReleases.filter(
-              (release) => release.isVisible
-            ).length
+            const isComplete = batch.status === 'COMPLETE'
             const assignmentLabel =
               batch.type === 'TRAINING'
                 ? 'Training'
@@ -294,202 +301,189 @@ export function BatchCreator({
                   ? 'bg-score-high-bg text-score-high-text'
                   : 'bg-muted text-muted-foreground'
             const irrSummary = batch.irrSummary
-            const hasApplicableIrr = (irrSummary?.applicableTeamCount ?? 0) > 0
+            const avgIrr = irrSummary?.averageAgreementPct ?? null
+            const lowIrr = irrSummary?.lowestAgreementPct ?? null
+            const hasIrr = (irrSummary?.applicableTeamCount ?? 0) > 0
 
             return (
-              <div key={batch.id} className={index > 0 ? 'border-t border-border' : ''}>
+              <div
+                key={batch.id}
+                className={cn(
+                  index > 0 ? 'border-t border-border/60' : '',
+                  isComplete ? 'opacity-60' : ''
+                )}
+              >
+                {/* Collapsed row */}
                 <div
-                  className="flex cursor-pointer items-center gap-2 px-3 py-2 transition-colors hover:bg-muted/50"
+                  className="grid cursor-pointer items-center px-3 py-2.5 transition-colors duration-150 hover:bg-muted/40"
+                  style={{ gridTemplateColumns: BATCH_GRID_COLS }}
                   onClick={() => toggleExpanded(batch.id)}
                 >
-                  <ChevronRight
-                    className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform duration-200 ${
-                      isExpanded ? 'rotate-90' : ''
-                    }`}
-                  />
-                  <span className="min-w-0 truncate text-sm font-medium">{batch.name}</span>
-                  <Badge className={`${batchStatusColors[batch.status] || ''} shrink-0 text-[10px]`}>
-                    {batchStatusLabels[batch.status] || batch.status}
-                  </Badge>
-                  <Badge className={`${assignmentBadgeClass} shrink-0 text-[10px]`}>
-                    {assignmentLabel}
-                  </Badge>
-                  <Badge variant="outline" className="shrink-0 text-[10px]">
-                    {visibleReleaseCount}/{batch.teamReleases.length} visible teams
-                  </Badge>
-                  {hasApplicableIrr && (
-                    <Badge variant="outline" className="shrink-0 text-[10px]">
-                      IRR ready {irrSummary?.readyTeamCount}/{irrSummary?.applicableTeamCount}
+                  <div className="flex items-center">
+                    <ChevronRight
+                      className={cn(
+                        'h-3.5 w-3.5 text-muted-foreground/60 transition-transform duration-200',
+                        isExpanded && 'rotate-90'
+                      )}
+                    />
+                  </div>
+
+                  <div className="min-w-0 pr-3">
+                    <span className="truncate text-sm font-medium">{batch.name}</span>
+                  </div>
+
+                  <div>
+                    <Badge className={cn(assignmentBadgeClass, 'text-[10px]')}>
+                      {assignmentLabel}
                     </Badge>
-                  )}
-                  {irrSummary?.averageAgreementPct != null && (
-                    <Badge
-                      className={`shrink-0 text-[10px] ${getIrrBadgeClass(
-                        irrSummary.averageAgreementPct,
-                        irrSummary.averageAgreementPct >= 80
-                      )}`}
-                    >
-                      Avg IRR {irrSummary.averageAgreementPct}%
+                  </div>
+
+                  <div>
+                    <Badge className={cn(batchStatusColors[batch.status] || '', 'text-[10px]')}>
+                      {batchStatusLabels[batch.status] || batch.status}
                     </Badge>
-                  )}
-                  {irrSummary?.lowestAgreementPct != null && (
-                    <Badge
-                      className={`shrink-0 text-[10px] ${getIrrBadgeClass(
-                        irrSummary.lowestAgreementPct,
-                        irrSummary.lowestAgreementPct >= 80
-                      )}`}
-                    >
-                      Low IRR {irrSummary.lowestAgreementPct}%
-                    </Badge>
-                  )}
-                  <div className="ml-auto flex shrink-0 items-center gap-2">
-                    <div className="h-1.5 w-16 overflow-hidden rounded-full bg-muted">
+                  </div>
+
+                  <div className="text-center">
+                    {hasIrr ? (
+                      <>
+                        <div className={cn('text-sm font-bold leading-tight', getIrrColorClass(avgIrr))}>
+                          {avgIrr != null ? `${avgIrr}%` : '—'}
+                        </div>
+                        {lowIrr != null && (
+                          <div className={cn('text-[10px] leading-tight', getIrrColorClass(lowIrr))}>
+                            low {lowIrr}%
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <span className="text-sm text-muted-foreground/30">—</span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-2 pl-2 pr-1">
+                    <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
                       <div
-                        className="h-full rounded-full bg-primary transition-all duration-300"
+                        className={cn(
+                          'h-full rounded-full transition-all duration-300',
+                          isComplete ? 'bg-muted-foreground/40' : 'bg-primary'
+                        )}
                         style={{ width: `${batch.progressPct}%` }}
                       />
                     </div>
-                    <span className="w-14 text-right text-xs tabular-nums text-muted-foreground">
+                    <span className="w-9 text-right text-xs tabular-nums text-muted-foreground">
                       {batch.progressPct}%
                     </span>
                   </div>
                 </div>
 
+                {/* Expanded content */}
                 {isExpanded && (
-                  <div className="space-y-2.5 border-t border-border/50 bg-muted/20 px-3 py-2.5 pl-8">
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                      <span>{batch.itemCount} items</span>
-                      {batch.activityId && <span>Activity {batch.activityId}</span>}
-                      {batch.conjunctionId && <span>{batch.conjunctionId}</span>}
-                      <span className="basis-full">
-                        Ranges:{' '}
-                        {batch.ranges
-                          .map(
-                            (range) =>
-                              `${range.startFeedbackId}-${range.endFeedbackId} (${range.itemCount})`
-                          )
-                          .join(', ')}
-                      </span>
-                      <span>
-                        Teams visible: {visibleReleaseCount}/{batch.teamReleases.length}
-                      </span>
-                      {hasApplicableIrr && (
-                        <span>
-                          IRR ready: {irrSummary?.readyTeamCount}/{irrSummary?.applicableTeamCount}
-                        </span>
-                      )}
-                      <span>
-                        Batch status: {batchStatusLabels[batch.status] || batch.status}
-                      </span>
-                    </div>
-
-                    <div className="space-y-2">
-                          {batch.teamReleases.length === 0 ? (
-                            <div className="rounded-xl border border-dashed border-border px-3 py-3 text-sm text-muted-foreground">
-                              No team assignments found for this batch. New batches
-                              assign every team automatically.
-                            </div>
-                          ) : (
-                            batch.teamReleases.map((release) => (
-                              <div
-                                key={release.id}
-                                className="rounded-xl border border-border bg-background/70 px-3 py-2"
-                              >
-                              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                                <div className="text-sm font-medium">{release.teamName}</div>
-                                <Badge className={`${batchStatusColors[release.status] || ''} text-[10px]`}>
-                                  {batchStatusLabels[release.status] || release.status}
-                                </Badge>
-                                <Badge variant="outline" className="text-[10px]">
-                                  {release.progressPct}%
-                                </Badge>
-                                {release.irr?.isApplicable && (
-                                  <Badge
-                                    className={`text-[10px] ${getIrrBadgeClass(
-                                      release.irr.agreementPct,
-                                      release.irr.isReady
-                                    )}`}
-                                  >
-                                    {release.irr.agreementPct == null
-                                      ? 'IRR pending'
-                                      : `IRR ${release.irr.agreementPct}%`}
-                                  </Badge>
-                                )}
-                                <span className="text-xs text-muted-foreground">
-                                  {batch.type === 'TRAINING'
-                                    ? 'Criteria: All criteria'
-                                    : `Criteria: ${release.dimensions.map((dimension) => dimension.label).join(', ')}`}
-                                </span>
-                              </div>
-                              <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-                                <span className="text-muted-foreground">
-                                  Members:{' '}
-                                  {release.members
-                                    .map((member) => member.name || member.email)
-                                    .join(', ')}
-                                </span>
-                                {release.irr?.isApplicable && (
-                                  <span className="text-muted-foreground">
-                                    Compared pairs: {release.irr.totalPairs > 0
-                                      ? `${release.irr.agreedPairs}/${release.irr.totalPairs} agreed`
-                                      : 'Not enough scores yet'}
-                                  </span>
-                                )}
-                                {batch.type === 'REGULAR' && !batch.isDoubleScored && release.members.length >= 2 && (
-                                  <span className="text-muted-foreground">
-                                    Items split: ~{Math.ceil(batch.itemCount / 2)}/{Math.floor(batch.itemCount / 2)} between teammates
-                                  </span>
-                                )}
-                                <label className="flex cursor-pointer items-center gap-1.5">
-                                  <input
-                                    type="checkbox"
-                                    checked={release.isVisible}
-                                    onChange={(event) =>
-                                      handleUpdateTeamRelease(batch.id, release.id, {
-                                        isVisible: event.target.checked,
-                                      })
-                                    }
-                                    className="size-3.5 rounded border-input"
-                                  />
-                                  <span className="text-muted-foreground">Visible now</span>
-                                </label>
-                              </div>
-                            </div>
-                          ))
-                        )}
+                  <div className="space-y-3 border-t border-border/50 bg-muted/20 px-4 py-3">
+                    {batch.teamReleases.length === 0 ? (
+                      <div className="rounded-xl border border-dashed border-border px-3 py-3 text-sm text-muted-foreground">
+                        No team assignments found for this batch.
                       </div>
-
-                    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
-                      {batch.type === 'REGULAR' && batch.isDoubleScored && (
-                        <div className="flex items-center gap-2">
-                          <span className="text-muted-foreground">Adjudicator:</span>
-                          <select
-                            className="flex h-6 rounded-md border border-input bg-background px-2 py-0.5 text-xs shadow-sm transition-all duration-200"
-                            value={batch.adjudicatorId ?? ''}
-                            onChange={(event) =>
-                              handleAdjudicatorChange(batch.id, event.target.value || null)
-                            }
+                    ) : (
+                      <div className="grid grid-cols-2 gap-2">
+                        {batch.teamReleases.map((release) => (
+                          <div
+                            key={release.id}
+                            className="rounded-xl border border-border bg-background px-3 py-2.5"
                           >
-                            <option value="">— None —</option>
-                            {evaluators.map((evaluator) => (
-                              <option key={evaluator.user.id} value={evaluator.user.id}>
-                                {evaluator.user.name || evaluator.user.email}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                      )}
-                      {batch.status === 'DRAFT' && (
+                            {/* Team header: avatar + generated name + IRR */}
+                            <div className="mb-2 flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <TeamAvatar name={release.teamId} size={26} />
+                                <span className="text-xs font-semibold truncate capitalize">
+                                  {generateName(release.teamId)}
+                                </span>
+                              </div>
+                              {release.irr?.isApplicable && (
+                                <span className={cn('text-sm font-bold leading-none shrink-0', getIrrColorClass(release.irr.agreementPct))}>
+                                  {release.irr.agreementPct != null ? `${release.irr.agreementPct}%` : '—'}
+                                </span>
+                              )}
+                            </div>
+                            {/* Member avatars with generated names */}
+                            <div className="flex flex-wrap gap-1.5 mb-2">
+                              {release.members.map((m) => (
+                                <div key={m.id} className="flex items-center gap-1">
+                                  <UserAvatar name={m.id} size={18} />
+                                  <span className="text-[10px] text-muted-foreground capitalize">
+                                    {generateName(m.id)}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                            {/* Criteria */}
+                            <div className="mb-2 truncate text-[10px] text-muted-foreground/60">
+                              {batch.type === 'TRAINING'
+                                ? 'All criteria'
+                                : release.dimensions.map((d) => d.label).join(', ')}
+                            </div>
+                            {/* Footer: status + visible toggle */}
+                            <div className="flex items-center justify-between">
+                              <Badge className={cn(batchStatusColors[release.status] || '', 'text-[10px]')}>
+                                {batchStatusLabels[release.status] || release.status}
+                              </Badge>
+                              <button
+                                onClick={() =>
+                                  handleUpdateTeamRelease(batch.id, release.id, {
+                                    isVisible: !release.isVisible,
+                                  })
+                                }
+                                className={cn(
+                                  'flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium transition-all duration-200',
+                                  release.isVisible
+                                    ? 'bg-primary/10 text-primary ring-1 ring-primary/20 hover:bg-primary/15'
+                                    : 'bg-muted text-muted-foreground ring-1 ring-border hover:bg-muted/80'
+                                )}
+                              >
+                                {release.isVisible
+                                  ? <Eye className="size-2.5" />
+                                  : <EyeOff className="size-2.5" />
+                                }
+                                {release.isVisible ? 'Visible' : 'Hidden'}
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {batch.type === 'REGULAR' && batch.isDoubleScored && (
+                      <div className="flex items-center gap-2 text-xs">
+                        <span className="text-muted-foreground">Adjudicator:</span>
+                        <select
+                          className="h-7 rounded-lg border border-border/70 bg-background px-2 text-xs transition-all duration-200 hover:border-border"
+                          value={batch.adjudicatorId ?? ''}
+                          onChange={(event) =>
+                            handleAdjudicatorChange(batch.id, event.target.value || null)
+                          }
+                        >
+                          <option value="">— None —</option>
+                          {evaluators.map((evaluator) => (
+                            <option key={evaluator.user.id} value={evaluator.user.id}>
+                              {evaluator.user.name || evaluator.user.email}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
+                    {batch.status === 'DRAFT' && (
+                      <div className="flex justify-end">
                         <Button
                           size="sm"
                           variant="ghost"
-                          className="ml-auto h-6 px-2 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"
+                          className="h-7 rounded-lg px-2 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"
                           onClick={() => handleDeleteBatch(batch.id)}
                         >
-                          Delete
+                          Delete batch
                         </Button>
-                      )}
-                    </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
