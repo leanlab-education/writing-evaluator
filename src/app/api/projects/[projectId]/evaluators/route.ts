@@ -1,5 +1,6 @@
 import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/db'
+import { getReleaseUserSlotIndex, isSlotSplitRelease } from '@/lib/team-batch-releases'
 import { NextRequest, NextResponse } from 'next/server'
 
 export async function GET(
@@ -19,33 +20,86 @@ export async function GET(
   const evaluators = await prisma.projectEvaluator.findMany({
     where: { projectId },
     include: {
-      user: {
-        select: { id: true, name: true, email: true },
-      },
-      _count: {
-        select: { assignments: true },
-      },
+      user: { select: { id: true, name: true, email: true } },
     },
     orderBy: { createdAt: 'asc' },
   })
 
-  // Fetch completed assignment counts per evaluator
-  const completedCounts = await prisma.assignment.groupBy({
-    by: ['evaluatorId'],
-    where: {
-      projectId,
-      status: 'COMPLETE',
+  // All batch assignments for this project
+  const batchAssignments = await prisma.batchAssignment.findMany({
+    where: { batch: { projectId } },
+    include: {
+      teamRelease: {
+        include: {
+          team: {
+            include: {
+              members: {
+                select: { userId: true },
+                orderBy: { user: { email: 'asc' } },
+              },
+            },
+          },
+        },
+      },
+      batch: {
+        select: { id: true, isDoubleScored: true, type: true },
+      },
     },
-    _count: { id: true },
   })
 
-  const completedMap = new Map(
-    completedCounts.map((c) => [c.evaluatorId, c._count.id])
-  )
+  // Distinct (userId, feedbackItemId) pairs with at least one score in this project
+  const scoredPairs = await prisma.score.findMany({
+    where: { feedbackItem: { batch: { projectId } }, isReconciled: false },
+    select: { userId: true, feedbackItemId: true },
+    distinct: ['userId', 'feedbackItemId'],
+  })
+
+  // completedCount per userId
+  const completedByUser = new Map<string, number>()
+  for (const { userId } of scoredPairs) {
+    completedByUser.set(userId, (completedByUser.get(userId) ?? 0) + 1)
+  }
+
+  // Group batch assignments by userId
+  const basByUser = new Map<string, typeof batchAssignments>()
+  for (const ba of batchAssignments) {
+    const list = basByUser.get(ba.userId) ?? []
+    list.push(ba)
+    basByUser.set(ba.userId, list)
+  }
+
+  // Compute slot-adjusted itemCount per user (same logic as my-projects route)
+  const assignedByUser = new Map<string, number>()
+  for (const [userId, bas] of basByUser) {
+    let total = 0
+    for (const ba of bas) {
+      const releaseContext = ba.teamRelease
+        ? {
+            id: ba.teamRelease.id,
+            scorerUserId: null,
+            batch: { id: ba.batch.id, isDoubleScored: ba.batch.isDoubleScored, type: ba.batch.type },
+            team: { members: ba.teamRelease.team.members.map((m) => ({ userId: m.userId })) },
+          }
+        : null
+      const slotSplit = releaseContext ? isSlotSplitRelease(releaseContext) : false
+      const userSlot =
+        releaseContext && slotSplit ? getReleaseUserSlotIndex(releaseContext, userId) : null
+
+      const itemFilter =
+        slotSplit && userSlot !== null
+          ? { batchId: ba.batch.id, slotIndex: userSlot }
+          : { batchId: ba.batch.id }
+
+      total += await prisma.feedbackItem.count({ where: itemFilter })
+    }
+    assignedByUser.set(userId, total)
+  }
 
   const result = evaluators.map((ev) => ({
-    ...ev,
-    completedCount: completedMap.get(ev.id) || 0,
+    id: ev.id,
+    user: ev.user,
+    assignedCount: assignedByUser.get(ev.user.id) ?? 0,
+    completedCount: completedByUser.get(ev.user.id) ?? 0,
   }))
 
   return NextResponse.json(result)
@@ -68,13 +122,9 @@ export async function POST(
   const { userId } = body
 
   if (!userId) {
-    return NextResponse.json(
-      { error: 'userId is required' },
-      { status: 400 }
-    )
+    return NextResponse.json({ error: 'userId is required' }, { status: 400 })
   }
 
-  // Verify project and user exist
   const [project, user] = await Promise.all([
     prisma.project.findUnique({ where: { id: projectId } }),
     prisma.user.findUnique({ where: { id: userId } }),
@@ -87,11 +137,8 @@ export async function POST(
     return NextResponse.json({ error: 'User not found' }, { status: 404 })
   }
 
-  // Check for existing assignment
   const existing = await prisma.projectEvaluator.findUnique({
-    where: {
-      projectId_userId: { projectId, userId },
-    },
+    where: { projectId_userId: { projectId, userId } },
   })
 
   if (existing) {
@@ -104,9 +151,7 @@ export async function POST(
   const evaluator = await prisma.projectEvaluator.create({
     data: { projectId, userId },
     include: {
-      user: {
-        select: { id: true, name: true, email: true },
-      },
+      user: { select: { id: true, name: true, email: true } },
     },
   })
 

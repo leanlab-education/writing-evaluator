@@ -76,21 +76,17 @@ interface Project {
   _count: {
     feedbackItems: number
     evaluators: number
-    assignments: number
   }
 }
 
 interface EvaluatorRow {
   id: string
-  userId: string
   user: {
     id: string
     name: string | null
     email: string
   }
-  _count: {
-    assignments: number
-  }
+  assignedCount: number
   completedCount: number
 }
 
@@ -669,7 +665,7 @@ export function ProjectDetailClient({
                   </TableHeader>
                   <TableBody>
                     {evaluators.map((ev) => {
-                      const assigned = ev._count.assignments
+                      const assigned = ev.assignedCount
                       const completed = ev.completedCount
                       const pct =
                         assigned > 0

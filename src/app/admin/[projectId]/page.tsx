@@ -1,6 +1,7 @@
 import { auth } from '@/lib/auth'
 import { redirect, notFound } from 'next/navigation'
 import { prisma } from '@/lib/db'
+import { getReleaseUserSlotIndex, isSlotSplitRelease } from '@/lib/team-batch-releases'
 import { ProjectDetailClient } from '@/components/project-detail-client'
 
 export default async function ProjectDetailPage({
@@ -27,7 +28,6 @@ export default async function ProjectDetailPage({
           select: {
             feedbackItems: true,
             evaluators: true,
-            assignments: true,
           },
         },
       },
@@ -35,12 +35,7 @@ export default async function ProjectDetailPage({
     prisma.projectEvaluator.findMany({
       where: { projectId },
       include: {
-        user: {
-          select: { id: true, name: true, email: true },
-        },
-        _count: {
-          select: { assignments: true },
-        },
+        user: { select: { id: true, name: true, email: true } },
       },
       orderBy: { createdAt: 'asc' },
     }),
@@ -101,26 +96,73 @@ export default async function ProjectDetailPage({
 
   if (!project) notFound()
 
-  // Get completed assignment counts per evaluator
-  const completedCounts = await prisma.assignment.groupBy({
-    by: ['evaluatorId'],
-    where: {
-      projectId,
-      status: 'COMPLETE',
-    },
-    _count: { id: true },
-  })
+  // Compute slot-adjusted assigned + completed counts per evaluator
+  const [allBatchAssignments, scoredPairs] = await Promise.all([
+    prisma.batchAssignment.findMany({
+      where: { batch: { projectId } },
+      include: {
+        teamRelease: {
+          include: {
+            team: {
+              include: {
+                members: {
+                  select: { userId: true },
+                  orderBy: { user: { email: 'asc' } },
+                },
+              },
+            },
+          },
+        },
+        batch: { select: { id: true, isDoubleScored: true, type: true } },
+      },
+    }),
+    prisma.score.findMany({
+      where: { feedbackItem: { batch: { projectId } }, isReconciled: false },
+      select: { userId: true, feedbackItemId: true },
+      distinct: ['userId', 'feedbackItemId'],
+    }),
+  ])
 
-  const completedMap = new Map(
-    completedCounts.map((c) => [c.evaluatorId, c._count.id])
-  )
+  const completedByUser = new Map<string, number>()
+  for (const { userId } of scoredPairs) {
+    completedByUser.set(userId, (completedByUser.get(userId) ?? 0) + 1)
+  }
+
+  const basByUser = new Map<string, typeof allBatchAssignments>()
+  for (const ba of allBatchAssignments) {
+    const list = basByUser.get(ba.userId) ?? []
+    list.push(ba)
+    basByUser.set(ba.userId, list)
+  }
+
+  const assignedByUser = new Map<string, number>()
+  for (const [userId, bas] of basByUser) {
+    let total = 0
+    for (const ba of bas) {
+      const releaseContext = ba.teamRelease
+        ? {
+            id: ba.teamRelease.id,
+            scorerUserId: null,
+            batch: { id: ba.batch.id, isDoubleScored: ba.batch.isDoubleScored, type: ba.batch.type },
+            team: { members: ba.teamRelease.team.members.map((m) => ({ userId: m.userId })) },
+          }
+        : null
+      const slotSplit = releaseContext ? isSlotSplitRelease(releaseContext) : false
+      const userSlot = releaseContext && slotSplit ? getReleaseUserSlotIndex(releaseContext, userId) : null
+      const itemFilter =
+        slotSplit && userSlot !== null
+          ? { batchId: ba.batch.id, slotIndex: userSlot }
+          : { batchId: ba.batch.id }
+      total += await prisma.feedbackItem.count({ where: itemFilter })
+    }
+    assignedByUser.set(userId, total)
+  }
 
   const evaluators = evaluatorsRaw.map((ev) => ({
     id: ev.id,
-    userId: ev.userId,
     user: ev.user,
-    _count: ev._count,
-    completedCount: completedMap.get(ev.id) || 0,
+    assignedCount: assignedByUser.get(ev.user.id) ?? 0,
+    completedCount: completedByUser.get(ev.user.id) ?? 0,
   }))
 
   // Serialize dates for client component
