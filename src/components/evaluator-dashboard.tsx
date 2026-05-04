@@ -13,6 +13,8 @@ import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { FileText } from 'lucide-react'
 import { AppShell } from '@/components/app-shell'
+import { TeamAvatar, UserAvatar } from '@/components/user-avatar'
+import { generateName } from '@/lib/generate-name'
 
 interface BatchInfo {
   id: string
@@ -26,9 +28,9 @@ interface BatchInfo {
 }
 
 interface TeamInfo {
-  teamName: string
+  teamId: string
   criteria: string[]
-  partnerName: string | null
+  partnerId: string | null
 }
 
 interface EvaluatorProject {
@@ -115,18 +117,19 @@ export function EvaluatorDashboard({
                     {/* Team info */}
                     {ep.team && (
                       <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md bg-muted px-3 py-2 text-xs">
-                        <span className="font-medium">{ep.team.teamName}</span>
+                        <TeamAvatar name={ep.team.teamId} size={20} />
+                        <span className="font-medium">{generateName(ep.team.teamId)}</span>
                         <span className="text-muted-foreground">&middot;</span>
                         <span className="text-muted-foreground">
                           Criteria: {ep.team.criteria.join(', ')}
                         </span>
-                        {ep.team.partnerName && (
+                        {ep.team.partnerId && (
                           <>
+                            <span className="text-muted-foreground">&middot;</span>
+                            <span className="text-muted-foreground">Partner:</span>
+                            <UserAvatar name={ep.team.partnerId} size={16} />
                             <span className="text-muted-foreground">
-                              &middot;
-                            </span>
-                            <span className="text-muted-foreground">
-                              Partner: {ep.team.partnerName}
+                              {generateName(ep.team.partnerId)}
                             </span>
                           </>
                         )}

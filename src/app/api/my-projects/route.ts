@@ -134,21 +134,21 @@ export async function GET() {
   const teamByProject = new Map<
     string,
     {
-      teamName: string
+      teamId: string
       criteria: string[]
-      partnerName: string | null
+      partnerId: string | null
     }
   >()
 
   for (const tm of teamMemberships) {
-    const partner = tm.team.members
+    const partnerId = tm.team.members
       .filter((m) => m.userId !== session.user!.id)
-      .map((m) => m.user.name || m.user.email)[0] || null
+      .map((m) => m.userId)[0] || null
 
     teamByProject.set(tm.team.projectId, {
-      teamName: tm.team.name,
+      teamId: tm.team.id,
       criteria: tm.team.dimensions.map((d) => d.dimension.label),
-      partnerName: partner,
+      partnerId,
     })
   }
 

@@ -48,6 +48,8 @@ import { TeamManagement } from '@/components/team-management'
 import { BatchCreator } from '@/components/batch-creator'
 import { ImportEvaluatorsDialog } from '@/components/import-evaluators-dialog'
 import { FeedbackItemsTab, type FeedbackItemRow } from '@/components/feedback-items-tab'
+import { UserAvatar } from '@/components/user-avatar'
+import { generateName } from '@/lib/generate-name'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -674,9 +676,12 @@ export function ProjectDetailClient({
                       return (
                         <TableRow key={ev.id}>
                           <TableCell className="font-medium">
-                            {ev.user.name || '-'}
+                            <span className="flex items-center gap-2">
+                              <UserAvatar name={ev.user.id} size={20} />
+                              {generateName(ev.user.id)}
+                            </span>
                           </TableCell>
-                          <TableCell>{ev.user.email}</TableCell>
+                          <TableCell className="text-muted-foreground">{ev.user.email}</TableCell>
                           <TableCell className="text-right">
                             {assigned}
                           </TableCell>
