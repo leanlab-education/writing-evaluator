@@ -32,5 +32,6 @@ export function generateName(seed: string): string {
   const hash = hashString(seed)
   const adj = ADJECTIVES[hash % ADJECTIVES.length]
   const noun = NOUNS[Math.floor(hash / ADJECTIVES.length) % NOUNS.length]
-  return `${adj} ${noun}`
+  const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
+  return `${cap(adj)} ${cap(noun)}`
 }

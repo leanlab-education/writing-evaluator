@@ -20,7 +20,9 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { Plus, Loader2, Trash2, Users } from 'lucide-react'
+import { Plus, Loader2, Trash2 } from 'lucide-react'
+import { TeamAvatar, UserAvatar } from '@/components/user-avatar'
+import { generateName } from '@/lib/generate-name'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -380,8 +382,8 @@ export function TeamManagement({ projectId, evaluators, rubricDimensions }: Prop
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between">
                   <CardTitle className="flex items-center gap-2 text-base">
-                    <Users className="h-4 w-4 text-muted-foreground" />
-                    {team.name}
+                    <TeamAvatar name={team.id} size={26} />
+                    {generateName(team.id)}
                   </CardTitle>
                   <Button
                     variant="ghost"
@@ -406,8 +408,9 @@ export function TeamManagement({ projectId, evaluators, rubricDimensions }: Prop
                   </p>
                   <div className="flex flex-wrap gap-1.5">
                     {team.members.map((m) => (
-                      <Badge key={m.id} variant="secondary">
-                        {m.user.name || m.user.email}
+                      <Badge key={m.id} variant="secondary" className="flex items-center gap-1.5 pl-1">
+                        <UserAvatar name={m.userId} size={16} />
+                        {generateName(m.userId)}
                       </Badge>
                     ))}
                   </div>
