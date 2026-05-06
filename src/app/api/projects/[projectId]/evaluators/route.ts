@@ -25,6 +25,18 @@ export async function GET(
     orderBy: { createdAt: 'asc' },
   })
 
+  // Team membership per user, scoped to this project
+  const teamMemberships = await prisma.evaluatorTeamMember.findMany({
+    where: {
+      userId: { in: evaluators.map((ev) => ev.user.id) },
+      team: { projectId },
+    },
+    include: { team: { select: { id: true, name: true } } },
+  })
+  const teamByUser = new Map(
+    teamMemberships.map((m) => [m.userId, m.team])
+  )
+
   // All batch assignments for this project
   const batchAssignments = await prisma.batchAssignment.findMany({
     where: { batch: { projectId } },
@@ -95,11 +107,21 @@ export async function GET(
     assignedByUser.set(userId, total)
   }
 
+  const latestScores = await prisma.score.findMany({
+    where: { feedbackItem: { batch: { projectId } } },
+    select: { userId: true, scoredAt: true },
+    orderBy: { scoredAt: 'desc' },
+    distinct: ['userId'],
+  })
+  const lastScoredByUser = new Map(latestScores.map((s) => [s.userId, s.scoredAt.toISOString()]))
+
   const result = evaluators.map((ev) => ({
     id: ev.id,
     user: ev.user,
     assignedCount: assignedByUser.get(ev.user.id) ?? 0,
     completedCount: completedByUser.get(ev.user.id) ?? 0,
+    lastScoredAt: lastScoredByUser.get(ev.user.id) ?? null,
+    team: teamByUser.get(ev.user.id) ?? null,
   }))
 
   return NextResponse.json(result)

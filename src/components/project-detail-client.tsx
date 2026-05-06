@@ -41,6 +41,7 @@ import {
   ArrowLeft,
   CheckCircle,
   Eye,
+  AlertTriangle,
 } from 'lucide-react'
 import { AppShell } from '@/components/app-shell'
 import { statusColors } from '@/lib/status-colors'
@@ -50,6 +51,24 @@ import { ImportEvaluatorsDialog } from '@/components/import-evaluators-dialog'
 import { FeedbackItemsTab, type FeedbackItemRow } from '@/components/feedback-items-tab'
 import { UserAvatar } from '@/components/user-avatar'
 import { generateName } from '@/lib/generate-name'
+import { OverviewTab } from '@/components/overview-tab'
+import { Progress } from '@/components/ui/progress'
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function formatRelativeTime(iso: string | null): string {
+  if (!iso) return 'Never'
+  const diff = Date.now() - new Date(iso).getTime()
+  const minutes = Math.floor(diff / 60000)
+  if (minutes < 2) return 'Just now'
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  return `${days}d ago`
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -90,6 +109,13 @@ interface EvaluatorRow {
   }
   assignedCount: number
   completedCount: number
+  lastScoredAt: string | null
+  team: { id: string; name: string } | null
+}
+
+interface ProjectTeam {
+  id: string
+  name: string
 }
 
 interface BatchRow {
@@ -191,13 +217,16 @@ export function ProjectDetailClient({
   const [evalError, setEvalError] = useState('')
   const [evalSuccess, setEvalSuccess] = useState('')
 
-  // Assignments
-  const [assigning, setAssigning] = useState(false)
-  const [assignResult, setAssignResult] = useState('')
-
   // Batches
   const [batches, setBatches] = useState<BatchRow[]>([])
   const [batchesLoading, setBatchesLoading] = useState(false)
+
+  // Teams (for inline team assignment in Annotators table + Add Annotator dialog)
+  const [teams, setTeams] = useState<ProjectTeam[]>([])
+  const [teamPickerUser, setTeamPickerUser] = useState<EvaluatorRow | null>(null)
+  const [teamPickerSaving, setTeamPickerSaving] = useState(false)
+  const [teamPickerError, setTeamPickerError] = useState('')
+  const [evalInitialTeamId, setEvalInitialTeamId] = useState<string>('')
 
   // Export filters
   const [exportActivity, setExportActivity] = useState('')
@@ -252,10 +281,26 @@ export function ProjectDetailClient({
   }, [projectId])
 
   useEffect(() => {
-    if (activeTab === 'batches') {
+    if (activeTab === 'batches' || activeTab === 'overview') {
       fetchBatches()
     }
   }, [activeTab, fetchBatches])
+
+  const fetchTeams = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/projects/${projectId}/teams`)
+      if (res.ok) {
+        const data = await res.json()
+        setTeams(data.map((t: { id: string; name: string }) => ({ id: t.id, name: t.name })))
+      }
+    } catch (err) {
+      console.error('Failed to fetch teams:', err)
+    }
+  }, [projectId])
+
+  useEffect(() => {
+    fetchTeams()
+  }, [fetchTeams])
 
   // ---------------------------------------------------------------------------
   // Actions
@@ -280,8 +325,27 @@ export function ProjectDetailClient({
 
       if (res.ok) {
         const data = await res.json()
+        // If a team was selected, assign now (best-effort — failure surfaces but invite succeeded)
+        if (evalInitialTeamId && data.userId) {
+          const teamRes = await fetch(
+            `/api/projects/${projectId}/evaluators/${data.userId}/team`,
+            {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ teamId: evalInitialTeamId }),
+            }
+          )
+          if (!teamRes.ok) {
+            const teamErr = await teamRes.json().catch(() => ({}))
+            setEvalError(`Annotator added but team assignment failed: ${teamErr.error || 'unknown error'}`)
+            await fetchEvaluators()
+            await fetchProject()
+            return
+          }
+        }
         setEvalEmail('')
         setEvalName('')
+        setEvalInitialTeamId('')
         if (data.invited) {
           setEvalSuccess('Invitation email sent!')
         } else if (data.alreadyHasPassword) {
@@ -306,30 +370,30 @@ export function ProjectDetailClient({
     }
   }
 
-  async function handleAssignAll() {
-    setAssigning(true)
-    setAssignResult('')
-
+  async function handleSetTeam(userId: string, teamId: string | null) {
+    setTeamPickerSaving(true)
+    setTeamPickerError('')
     try {
-      const res = await fetch(`/api/projects/${projectId}/assignments`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      })
-
-      if (res.ok) {
-        const data = await res.json()
-        setAssignResult(`Created ${data.created} assignments`)
-        await fetchEvaluators()
-        await fetchProject()
-      } else {
-        const err = await res.json()
-        setAssignResult(err.error || 'Failed to create assignments')
+      const res = await fetch(
+        `/api/projects/${projectId}/evaluators/${userId}/team`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ teamId }),
+        }
+      )
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        setTeamPickerError(err.error || 'Failed to update team')
+        return
       }
+      await Promise.all([fetchEvaluators(), fetchTeams()])
+      setTeamPickerUser(null)
     } catch (err) {
-      console.error('Failed to assign items:', err)
-      setAssignResult('Something went wrong')
+      console.error('Failed to update team:', err)
+      setTeamPickerError('Something went wrong')
     } finally {
-      setAssigning(false)
+      setTeamPickerSaving(false)
     }
   }
 
@@ -387,29 +451,41 @@ export function ProjectDetailClient({
             <ArrowLeft className="mr-1 h-4 w-4" />
             All Projects
           </Button>
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold tracking-tight">
-              {project.name}
-            </h1>
-            {(() => {
-              // Derive display status from batch states
-              const statuses = batches.map((b) => b.status)
-              let displayStatus = project.status
-              if (statuses.length > 0) {
-                if (statuses.every((s) => s === 'COMPLETE')) displayStatus = 'COMPLETE'
-                else if (statuses.some((s) => s === 'RECONCILING')) displayStatus = 'RECONCILIATION'
-                else if (statuses.some((s) => s === 'SCORING')) displayStatus = 'ACTIVE'
-                else displayStatus = 'SETUP'
-              }
-              return (
-                <Badge
-                  variant="outline"
-                  className={statusColors[displayStatus] || ''}
-                >
-                  {displayStatus}
-                </Badge>
-              )
-            })()}
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <h1 className="text-2xl font-bold tracking-tight">
+                {project.name}
+              </h1>
+              {(() => {
+                // Derive display status from batch states
+                const statuses = batches.map((b) => b.status)
+                let displayStatus = project.status
+                if (statuses.length > 0) {
+                  if (statuses.every((s) => s === 'COMPLETE')) displayStatus = 'COMPLETE'
+                  else if (statuses.some((s) => s === 'RECONCILING')) displayStatus = 'RECONCILIATION'
+                  else if (statuses.some((s) => s === 'SCORING')) displayStatus = 'ACTIVE'
+                  else displayStatus = 'SETUP'
+                }
+                return (
+                  <Badge
+                    variant="outline"
+                    className={statusColors[displayStatus] || ''}
+                  >
+                    {displayStatus}
+                  </Badge>
+                )
+              })()}
+            </div>
+            {totalItems > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => router.push(`/evaluate/${projectId}`)}
+              >
+                <Eye className="mr-2 h-3.5 w-3.5" />
+                Preview Annotator View
+              </Button>
+            )}
           </div>
           {project.description && (
             <p className="mt-1 text-sm text-muted-foreground">
@@ -435,116 +511,19 @@ export function ProjectDetailClient({
           </TabsList>
 
           {/* ============== OVERVIEW TAB ============== */}
-          <TabsContent value="overview" className="mt-6 space-y-6">
-            {/* Stats */}
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardDescription>Total Items</CardDescription>
-                  <CardTitle className="text-2xl">{totalItems}</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <FileText className="h-4 w-4 text-muted-foreground" />
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardDescription>Scored Items</CardDescription>
-                  <CardTitle className="text-2xl">{scoredItemCount}</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <CheckCircle className="h-4 w-4 text-muted-foreground" />
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardDescription>Annotators</CardDescription>
-                  <CardTitle className="text-2xl">
-                    {project._count.evaluators}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <Users className="h-4 w-4 text-muted-foreground" />
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardDescription>Completion</CardDescription>
-                  <CardTitle className="text-2xl">{completionPct}%</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <BarChart3 className="h-4 w-4 text-muted-foreground" />
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* Actions */}
-            <div className="flex flex-wrap gap-3">
-              <Button
-                variant="outline"
-                onClick={() =>
-                  router.push(`/admin/${projectId}/import`)
-                }
-              >
-                <Upload className="mr-2 h-4 w-4" />
-                Import Data
-              </Button>
-
-              {totalItems > 0 && (
-                <Button
-                  variant="outline"
-                  onClick={() =>
-                    router.push(`/evaluate/${projectId}`)
-                  }
-                >
-                  <Eye className="mr-2 h-4 w-4" />
-                  Preview Annotator View
-                </Button>
-              )}
-
-            </div>
-
-            {/* StudyFlow Integration */}
-            <Card>
-              <CardHeader className="pb-2">
-                <CardDescription>StudyFlow Integration</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="flex items-end gap-3">
-                  <div className="flex-1 space-y-1">
-                    <Label htmlFor="studyflow-id" className="text-xs text-muted-foreground">
-                      StudyFlow Study ID
-                    </Label>
-                    <Input
-                      id="studyflow-id"
-                      value={project.studyflowStudyId || ''}
-                      onChange={(e) => {
-                        setProject((prev) => ({ ...prev, studyflowStudyId: e.target.value || null }))
-                      }}
-                      placeholder="e.g. clx1abc2d..."
-                      className="font-mono text-sm"
-                    />
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={async () => {
-                      await fetch(`/api/projects/${projectId}`, {
-                        method: 'PATCH',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ studyflowStudyId: project.studyflowStudyId }),
-                      })
-                      await fetchProject()
-                    }}
-                  >
-                    Save
-                  </Button>
-                </div>
-                <p className="mt-2 text-xs text-muted-foreground">
-                  Link this project to a StudyFlow study to enable participant import.
-                </p>
-              </CardContent>
-            </Card>
+          <TabsContent value="overview" className="mt-6">
+            <OverviewTab
+              project={project}
+              scoredItemCount={scoredItemCount}
+              evaluators={evaluators}
+              batches={batches}
+              projectId={projectId}
+              onNavigateToTab={(tab) => {
+                setActiveTab(tab)
+                if (tab === 'batches') fetchBatches()
+              }}
+              onImportData={() => router.push(`/admin/${projectId}/import`)}
+            />
           </TabsContent>
 
           {/* ============== ANNOTATORS TAB ============== */}
@@ -552,26 +531,12 @@ export function ProjectDetailClient({
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold">Annotators</h2>
               <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  onClick={handleAssignAll}
-                  disabled={assigning}
-                >
-                  {assigning ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <Users className="mr-2 h-4 w-4" />
-                  )}
-                  Assign All Items
-                </Button>
-
                 {project.studyflowStudyId && (
                   <ImportEvaluatorsDialog
                     projectId={projectId}
                     onImported={() => { fetchEvaluators(); fetchProject() }}
                   />
                 )}
-
                 <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
                   <DialogTrigger render={<Button />}>
                     <Plus className="mr-2 h-4 w-4" />
@@ -602,6 +567,38 @@ export function ProjectDetailClient({
                           placeholder="Jane Doe"
                         />
                       </div>
+                      {teams.length > 0 && (
+                        <div className="space-y-2">
+                          <Label>Team (optional)</Label>
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setEvalInitialTeamId('')}
+                              className={`px-3 py-1.5 text-xs font-medium rounded-md border transition-all duration-200 ${
+                                evalInitialTeamId === ''
+                                  ? 'bg-primary text-primary-foreground border-primary'
+                                  : 'bg-background text-foreground border-border hover:border-primary/40'
+                              }`}
+                            >
+                              No team
+                            </button>
+                            {teams.map((t) => (
+                              <button
+                                key={t.id}
+                                type="button"
+                                onClick={() => setEvalInitialTeamId(t.id)}
+                                className={`px-3 py-1.5 text-xs font-medium rounded-md border transition-all duration-200 ${
+                                  evalInitialTeamId === t.id
+                                    ? 'bg-primary text-primary-foreground border-primary'
+                                    : 'bg-background text-foreground border-border hover:border-primary/40'
+                                }`}
+                              >
+                                {generateName(t.id)}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                       <p className="text-xs text-muted-foreground">
                         An invitation email will be sent so they can set their own password.
                       </p>
@@ -619,6 +616,7 @@ export function ProjectDetailClient({
                             setAddDialogOpen(false)
                             setEvalError('')
                             setEvalSuccess('')
+                            setEvalInitialTeamId('')
                           }}
                         >
                           Cancel
@@ -643,58 +641,79 @@ export function ProjectDetailClient({
               </div>
             </div>
 
-            {assignResult && (
-              <Alert>
-                <AlertDescription>{assignResult}</AlertDescription>
-              </Alert>
-            )}
-
             {evaluators.length === 0 ? (
               <div className="py-8 text-center text-sm text-muted-foreground">
                 No annotators assigned to this project yet.
               </div>
             ) : (
-              <div className="rounded-md border">
+              <Card>
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Name</TableHead>
+                      <TableHead className="pl-5">Annotator</TableHead>
                       <TableHead>Email</TableHead>
+                      <TableHead>Team</TableHead>
                       <TableHead className="text-right">Assigned</TableHead>
                       <TableHead className="text-right">Completed</TableHead>
-                      <TableHead className="text-right">Completion</TableHead>
+                      <TableHead>Progress</TableHead>
+                      <TableHead className="pr-5">Last Active</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {evaluators.map((ev) => {
-                      const assigned = ev.assignedCount
-                      const completed = ev.completedCount
-                      const pct =
-                        assigned > 0
-                          ? Math.round((completed / assigned) * 100)
-                          : 0
+                      const pct = ev.assignedCount > 0
+                        ? Math.round((ev.completedCount / ev.assignedCount) * 100)
+                        : 0
+                      const low = pct < 50 && ev.assignedCount > 0
+                      const lastActive = ev.lastScoredAt
+                        ? formatRelativeTime(ev.lastScoredAt)
+                        : 'Never'
                       return (
-                        <TableRow key={ev.id}>
-                          <TableCell className="font-medium">
-                            <span className="flex items-center gap-2">
-                              <UserAvatar name={ev.user.id} size={20} />
-                              {generateName(ev.user.id)}
-                            </span>
+                        <TableRow key={ev.id} className="hover:bg-muted/30 transition-colors">
+                          <TableCell className="pl-5">
+                            <div className="flex items-center gap-2.5">
+                              <UserAvatar name={ev.user.id} size={28} />
+                              <div>
+                                <p className="text-sm font-medium text-foreground">{generateName(ev.user.id)}</p>
+                              </div>
+                              {low && <AlertTriangle className="h-3.5 w-3.5 text-destructive shrink-0" />}
+                            </div>
                           </TableCell>
-                          <TableCell className="text-muted-foreground">{ev.user.email}</TableCell>
-                          <TableCell className="text-right">
-                            {assigned}
+                          <TableCell className="text-sm text-muted-foreground">{ev.user.email}</TableCell>
+                          <TableCell>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setTeamPickerError('')
+                                setTeamPickerUser(ev)
+                              }}
+                              className="text-xs px-2 py-1 rounded-md border border-border bg-background hover:border-primary/40 hover:bg-muted/40 transition-all duration-200 text-foreground"
+                            >
+                              {ev.team ? generateName(ev.team.id) : (
+                                <span className="text-muted-foreground">Assign team</span>
+                              )}
+                            </button>
                           </TableCell>
-                          <TableCell className="text-right">
-                            {completed}
+                          <TableCell className="text-right text-sm">{ev.assignedCount}</TableCell>
+                          <TableCell className="text-right text-sm">{ev.completedCount}</TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-2 min-w-32">
+                              <Progress
+                                value={pct}
+                                className={`h-1.5 flex-1 ${low ? '[&>div]:bg-destructive' : ''}`}
+                              />
+                              <span className={`text-xs font-medium w-8 text-right shrink-0 ${low ? 'text-destructive' : 'text-muted-foreground'}`}>
+                                {pct}%
+                              </span>
+                            </div>
                           </TableCell>
-                          <TableCell className="text-right">{pct}%</TableCell>
+                          <TableCell className="pr-5 text-xs text-muted-foreground">{lastActive}</TableCell>
                         </TableRow>
                       )
                     })}
                   </TableBody>
                 </Table>
-              </div>
+              </Card>
             )}
           </TabsContent>
 
@@ -962,6 +981,100 @@ export function ProjectDetailClient({
           </TabsContent>
         </Tabs>
       </div>
+
+      {/* ============== TEAM PICKER DIALOG ============== */}
+      <Dialog
+        open={teamPickerUser !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setTeamPickerUser(null)
+            setTeamPickerError('')
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              Assign team
+              {teamPickerUser && (
+                <span className="block text-sm font-normal text-muted-foreground mt-1">
+                  {generateName(teamPickerUser.user.id)} · {teamPickerUser.user.email}
+                </span>
+              )}
+            </DialogTitle>
+          </DialogHeader>
+          {teams.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No teams yet. Create a team in the Teams tab first.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              <button
+                type="button"
+                disabled={teamPickerSaving}
+                onClick={() => teamPickerUser && handleSetTeam(teamPickerUser.user.id, null)}
+                className={`w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-md border transition-all duration-200 ${
+                  teamPickerUser?.team === null
+                    ? 'bg-primary/5 border-primary/40'
+                    : 'bg-background border-border hover:border-primary/40 hover:bg-muted/40'
+                } disabled:opacity-50 disabled:cursor-not-allowed`}
+              >
+                <span className="text-sm font-medium text-foreground">No team</span>
+                {teamPickerUser?.team === null && (
+                  <CheckCircle className="h-4 w-4 text-primary" />
+                )}
+              </button>
+              {teams.map((t) => {
+                const selected = teamPickerUser?.team?.id === t.id
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    disabled={teamPickerSaving}
+                    onClick={() => teamPickerUser && handleSetTeam(teamPickerUser.user.id, t.id)}
+                    className={`w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-md border transition-all duration-200 ${
+                      selected
+                        ? 'bg-primary/5 border-primary/40'
+                        : 'bg-background border-border hover:border-primary/40 hover:bg-muted/40'
+                    } disabled:opacity-50 disabled:cursor-not-allowed`}
+                  >
+                    <span className="text-sm font-medium text-foreground">
+                      {generateName(t.id)}
+                    </span>
+                    {selected && <CheckCircle className="h-4 w-4 text-primary" />}
+                  </button>
+                )
+              })}
+            </div>
+          )}
+          {teamPickerError && (
+            <p className="text-sm text-destructive mt-2">{teamPickerError}</p>
+          )}
+          <p className="text-xs text-muted-foreground">
+            Each annotator can only be on one team per project. Switching teams is blocked once they have scored items on the involved dimensions.
+          </p>
+          <div className="flex justify-end">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={teamPickerSaving}
+              onClick={() => {
+                setTeamPickerUser(null)
+                setTeamPickerError('')
+              }}
+            >
+              {teamPickerSaving ? (
+                <>
+                  <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                  Saving…
+                </>
+              ) : (
+                'Close'
+              )}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </AppShell>
   )
 }

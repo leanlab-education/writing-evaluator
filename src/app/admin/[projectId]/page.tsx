@@ -158,11 +158,30 @@ export default async function ProjectDetailPage({
     assignedByUser.set(userId, total)
   }
 
+  const latestScores = await prisma.score.findMany({
+    where: { feedbackItem: { batch: { projectId } } },
+    select: { userId: true, scoredAt: true },
+    orderBy: { scoredAt: 'desc' },
+    distinct: ['userId'],
+  })
+  const lastScoredByUser = new Map(latestScores.map((s) => [s.userId, s.scoredAt.toISOString()]))
+
+  const teamMemberships = await prisma.evaluatorTeamMember.findMany({
+    where: {
+      userId: { in: evaluatorsRaw.map((ev) => ev.user.id) },
+      team: { projectId },
+    },
+    include: { team: { select: { id: true, name: true } } },
+  })
+  const teamByUser = new Map(teamMemberships.map((m) => [m.userId, m.team]))
+
   const evaluators = evaluatorsRaw.map((ev) => ({
     id: ev.id,
     user: ev.user,
     assignedCount: assignedByUser.get(ev.user.id) ?? 0,
     completedCount: completedByUser.get(ev.user.id) ?? 0,
+    lastScoredAt: lastScoredByUser.get(ev.user.id) ?? null,
+    team: teamByUser.get(ev.user.id) ?? null,
   }))
 
   // Serialize dates for client component
