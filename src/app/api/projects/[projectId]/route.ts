@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { NextRequest, NextResponse } from 'next/server'
 
 const VALID_STATUSES = ['SETUP', 'ACTIVE', 'RECONCILIATION', 'COMPLETE']
+const STUDYFLOW_STUDY_ID_REGEX = /^[a-zA-Z0-9_-]+$/
 
 export async function GET(
   _request: NextRequest,
@@ -68,6 +69,21 @@ export async function PATCH(
     return NextResponse.json(
       {
         error: `Invalid status. Must be one of: ${VALID_STATUSES.join(', ')}`,
+      },
+      { status: 400 }
+    )
+  }
+
+  if (
+    studyflowStudyId !== undefined &&
+    studyflowStudyId !== null &&
+    studyflowStudyId !== '' &&
+    !STUDYFLOW_STUDY_ID_REGEX.test(studyflowStudyId)
+  ) {
+    return NextResponse.json(
+      {
+        error:
+          'Invalid studyflowStudyId. Must be alphanumeric, underscores, or hyphens only.',
       },
       { status: 400 }
     )
