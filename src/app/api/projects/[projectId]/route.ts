@@ -2,7 +2,6 @@ import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/db'
 import { NextRequest, NextResponse } from 'next/server'
 
-const VALID_STATUSES = ['SETUP', 'ACTIVE', 'RECONCILIATION', 'COMPLETE']
 const STUDYFLOW_STUDY_ID_REGEX = /^[a-zA-Z0-9_-]+$/
 
 export async function GET(
@@ -63,16 +62,11 @@ export async function PATCH(
 
   const { projectId } = await params
   const body = await request.json()
-  const { status, studyflowStudyId } = body
+  const { studyflowStudyId } = body
 
-  if (status && !VALID_STATUSES.includes(status)) {
-    return NextResponse.json(
-      {
-        error: `Invalid status. Must be one of: ${VALID_STATUSES.join(', ')}`,
-      },
-      { status: 400 }
-    )
-  }
+  // Note: project.status is intentionally read-only via this endpoint. The
+  // displayed status is derived from batch states in the UI; the DB column is
+  // a stale legacy default and shouldn't be set by the API.
 
   if (
     studyflowStudyId !== undefined &&
@@ -91,7 +85,6 @@ export async function PATCH(
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const updateData: Record<string, any> = {}
-  if (status) updateData.status = status
   if (studyflowStudyId !== undefined) updateData.studyflowStudyId = studyflowStudyId || null
 
   const project = await prisma.project.update({
