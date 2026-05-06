@@ -1,6 +1,6 @@
 import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/db'
-import { getReleaseUserSlotIndex, isSlotSplitRelease } from '@/lib/team-batch-releases'
+import { countForAssignment, loadSlotMaps } from '@/lib/evaluator-stats'
 import { NextResponse } from 'next/server'
 
 export async function GET() {
@@ -53,44 +53,10 @@ export async function GET() {
     },
   })
 
-  // One bulk groupBy of items by (batchId, slotIndex), and one of scored items
-  // (joined to scores by this user). Replaces 2 count() calls per batch.
-  const allBatchIds = Array.from(new Set(batchAssignments.map((ba) => ba.batch.id)))
-  const [itemSlotCounts, scoredItems] = await Promise.all([
-    allBatchIds.length > 0
-      ? prisma.feedbackItem.groupBy({
-          by: ['batchId', 'slotIndex'],
-          where: { batchId: { in: allBatchIds } },
-          _count: { _all: true },
-        })
-      : Promise.resolve([]),
-    allBatchIds.length > 0
-      ? prisma.feedbackItem.findMany({
-          where: {
-            batchId: { in: allBatchIds },
-            scores: { some: { userId: session.user.id } },
-          },
-          select: { batchId: true, slotIndex: true },
-        })
-      : Promise.resolve([]),
-  ])
-  const itemCountByBatchSlot = new Map<string, Map<number | null, number>>()
-  for (const row of itemSlotCounts) {
-    if (row.batchId === null) continue
-    if (!itemCountByBatchSlot.has(row.batchId)) {
-      itemCountByBatchSlot.set(row.batchId, new Map())
-    }
-    itemCountByBatchSlot.get(row.batchId)!.set(row.slotIndex, row._count._all)
-  }
-  const scoredCountByBatchSlot = new Map<string, Map<number | null, number>>()
-  for (const item of scoredItems) {
-    if (item.batchId === null) continue
-    if (!scoredCountByBatchSlot.has(item.batchId)) {
-      scoredCountByBatchSlot.set(item.batchId, new Map())
-    }
-    const slotMap = scoredCountByBatchSlot.get(item.batchId)!
-    slotMap.set(item.slotIndex, (slotMap.get(item.slotIndex) ?? 0) + 1)
-  }
+  const { itemCountByBatchSlot, scoredCountByBatchSlot } = await loadSlotMaps(
+    batchAssignments.map((ba) => ba.batch.id),
+    session.user.id
+  )
 
   // Group batch assignments by projectId
   const batchesByProject = new Map<
@@ -102,46 +68,10 @@ export async function GET() {
     const pid = ba.batch.project.id
     if (!batchesByProject.has(pid)) batchesByProject.set(pid, [])
 
-    const releaseContext = ba.teamRelease
-      ? {
-          id: ba.teamRelease.id,
-          scorerUserId: null,
-          batch: {
-            id: ba.batch.id,
-            isDoubleScored: ba.batch.isDoubleScored,
-            type: ba.batch.type,
-          },
-          team: {
-            members: ba.teamRelease.team.members.map((m) => ({
-              userId: m.userId,
-            })),
-          },
-        }
-      : null
-    const slotSplit = releaseContext ? isSlotSplitRelease(releaseContext) : false
-    const userSlot =
-      releaseContext && slotSplit
-        ? getReleaseUserSlotIndex(releaseContext, session.user.id)
-        : null
-
-    const itemSlots = itemCountByBatchSlot.get(ba.batch.id)
-    const scoredSlots = scoredCountByBatchSlot.get(ba.batch.id)
-    let itemCount = 0
-    let scoredCount = 0
-    if (itemSlots) {
-      if (slotSplit && userSlot !== null) {
-        itemCount = itemSlots.get(userSlot) ?? 0
-      } else {
-        for (const c of itemSlots.values()) itemCount += c
-      }
-    }
-    if (scoredSlots) {
-      if (slotSplit && userSlot !== null) {
-        scoredCount = scoredSlots.get(userSlot) ?? 0
-      } else {
-        for (const c of scoredSlots.values()) scoredCount += c
-      }
-    }
+    const itemCount = countForAssignment(ba, session.user.id, itemCountByBatchSlot)
+    const scoredCount = scoredCountByBatchSlot
+      ? countForAssignment(ba, session.user.id, scoredCountByBatchSlot)
+      : 0
 
     batchesByProject.get(pid)!.push({
       id: ba.batch.id,

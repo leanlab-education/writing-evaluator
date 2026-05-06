@@ -1,6 +1,6 @@
 import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/db'
-import { getReleaseUserSlotIndex, isSlotSplitRelease } from '@/lib/team-batch-releases'
+import { countForAssignment, loadSlotMaps } from '@/lib/evaluator-stats'
 import { NextRequest, NextResponse } from 'next/server'
 
 export async function GET(
@@ -80,50 +80,15 @@ export async function GET(
     basByUser.set(ba.userId, list)
   }
 
-  // One bulk count of items keyed by (batchId, slotIndex). Replaces a per-batch
-  // count() loop that produced O(users × batches) round-trips.
-  const allBatchIds = Array.from(new Set(batchAssignments.map((ba) => ba.batch.id)))
-  const itemSlotCounts =
-    allBatchIds.length > 0
-      ? await prisma.feedbackItem.groupBy({
-          by: ['batchId', 'slotIndex'],
-          where: { batchId: { in: allBatchIds } },
-          _count: { _all: true },
-        })
-      : []
-  const itemCountByBatchSlot = new Map<string, Map<number | null, number>>()
-  for (const row of itemSlotCounts) {
-    if (row.batchId === null) continue
-    if (!itemCountByBatchSlot.has(row.batchId)) {
-      itemCountByBatchSlot.set(row.batchId, new Map())
-    }
-    itemCountByBatchSlot.get(row.batchId)!.set(row.slotIndex, row._count._all)
-  }
+  const { itemCountByBatchSlot } = await loadSlotMaps(
+    batchAssignments.map((ba) => ba.batch.id)
+  )
 
-  // Compute slot-adjusted itemCount per user
   const assignedByUser = new Map<string, number>()
   for (const [userId, bas] of basByUser) {
     let total = 0
     for (const ba of bas) {
-      const releaseContext = ba.teamRelease
-        ? {
-            id: ba.teamRelease.id,
-            scorerUserId: null,
-            batch: { id: ba.batch.id, isDoubleScored: ba.batch.isDoubleScored, type: ba.batch.type },
-            team: { members: ba.teamRelease.team.members.map((m) => ({ userId: m.userId })) },
-          }
-        : null
-      const slotSplit = releaseContext ? isSlotSplitRelease(releaseContext) : false
-      const userSlot =
-        releaseContext && slotSplit ? getReleaseUserSlotIndex(releaseContext, userId) : null
-
-      const slots = itemCountByBatchSlot.get(ba.batch.id)
-      if (!slots) continue
-      if (slotSplit && userSlot !== null) {
-        total += slots.get(userSlot) ?? 0
-      } else {
-        for (const c of slots.values()) total += c
-      }
+      total += countForAssignment(ba, userId, itemCountByBatchSlot)
     }
     assignedByUser.set(userId, total)
   }
