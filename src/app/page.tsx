@@ -62,6 +62,45 @@ export default async function HomePage() {
     },
   })
 
+  // One bulk groupBy of items by (batchId, slotIndex), and one of scored items
+  // (joined to scores by this user). Replaces 2 count() calls per batch.
+  const allBatchIds = Array.from(new Set(batchAssignments.map((ba) => ba.batch.id)))
+  const [itemSlotCounts, scoredItems] = await Promise.all([
+    allBatchIds.length > 0
+      ? prisma.feedbackItem.groupBy({
+          by: ['batchId', 'slotIndex'],
+          where: { batchId: { in: allBatchIds } },
+          _count: { _all: true },
+        })
+      : Promise.resolve([]),
+    allBatchIds.length > 0
+      ? prisma.feedbackItem.findMany({
+          where: {
+            batchId: { in: allBatchIds },
+            scores: { some: { userId: session.user.id } },
+          },
+          select: { batchId: true, slotIndex: true },
+        })
+      : Promise.resolve([]),
+  ])
+  const itemCountByBatchSlot = new Map<string, Map<number | null, number>>()
+  for (const row of itemSlotCounts) {
+    if (row.batchId === null) continue
+    if (!itemCountByBatchSlot.has(row.batchId)) {
+      itemCountByBatchSlot.set(row.batchId, new Map())
+    }
+    itemCountByBatchSlot.get(row.batchId)!.set(row.slotIndex, row._count._all)
+  }
+  const scoredCountByBatchSlot = new Map<string, Map<number | null, number>>()
+  for (const item of scoredItems) {
+    if (item.batchId === null) continue
+    if (!scoredCountByBatchSlot.has(item.batchId)) {
+      scoredCountByBatchSlot.set(item.batchId, new Map())
+    }
+    const slotMap = scoredCountByBatchSlot.get(item.batchId)!
+    slotMap.set(item.slotIndex, (slotMap.get(item.slotIndex) ?? 0) + 1)
+  }
+
   // Group batch assignments by projectId and count scored items
   const batchesByProject = new Map<
     string,
@@ -106,18 +145,24 @@ export default async function HomePage() {
         ? getReleaseUserSlotIndex(releaseContext, session.user.id)
         : null
 
-    const itemFilter =
-      slotSplit && userSlot !== null
-        ? { batchId: ba.batch.id, slotIndex: userSlot }
-        : { batchId: ba.batch.id }
-
-    const itemCount = await prisma.feedbackItem.count({ where: itemFilter })
-    const scoredCount = await prisma.feedbackItem.count({
-      where: {
-        ...itemFilter,
-        scores: { some: { userId: session.user.id } },
-      },
-    })
+    const itemSlots = itemCountByBatchSlot.get(ba.batch.id)
+    const scoredSlots = scoredCountByBatchSlot.get(ba.batch.id)
+    let itemCount = 0
+    let scoredCount = 0
+    if (itemSlots) {
+      if (slotSplit && userSlot !== null) {
+        itemCount = itemSlots.get(userSlot) ?? 0
+      } else {
+        for (const c of itemSlots.values()) itemCount += c
+      }
+    }
+    if (scoredSlots) {
+      if (slotSplit && userSlot !== null) {
+        scoredCount = scoredSlots.get(userSlot) ?? 0
+      } else {
+        for (const c of scoredSlots.values()) scoredCount += c
+      }
+    }
 
     const releaseStatus = ba.teamRelease?.status ?? ba.batch.status
     const releaseId = ba.teamReleaseId ?? null
