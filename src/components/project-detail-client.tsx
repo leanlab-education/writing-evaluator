@@ -53,6 +53,7 @@ import { UserAvatar } from '@/components/user-avatar'
 import { generateName } from '@/lib/generate-name'
 import { OverviewTab } from '@/components/overview-tab'
 import { Progress } from '@/components/ui/progress'
+import { formatDuration, type Period } from '@/lib/activity-tracker-config'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -233,6 +234,12 @@ export function ProjectDetailClient({
   const [exportConjunction, setExportConjunction] = useState('')
   const [discrepancyBatchId, setDiscrepancyBatchId] = useState('')
 
+  // Annotator activity time
+  const [timePeriod, setTimePeriod] = useState<Period>('month')
+  const [timeData, setTimeData] = useState<
+    Map<string, { annotationSeconds: number; otherSeconds: number }>
+  >(new Map())
+
   // ---------------------------------------------------------------------------
   // Data re-fetching (after mutations)
   // ---------------------------------------------------------------------------
@@ -301,6 +308,37 @@ export function ProjectDetailClient({
   useEffect(() => {
     fetchTeams()
   }, [fetchTeams])
+
+  const fetchAnnotatorTime = useCallback(
+    async (period: Period) => {
+      try {
+        const res = await fetch(
+          `/api/projects/${projectId}/annotator-time?period=${period}`
+        )
+        if (!res.ok) return
+        const data = (await res.json()) as {
+          annotators: { userId: string; annotationSeconds: number; otherSeconds: number }[]
+        }
+        const next = new Map<string, { annotationSeconds: number; otherSeconds: number }>()
+        for (const row of data.annotators) {
+          next.set(row.userId, {
+            annotationSeconds: row.annotationSeconds,
+            otherSeconds: row.otherSeconds,
+          })
+        }
+        setTimeData(next)
+      } catch (err) {
+        console.error('Failed to fetch annotator time:', err)
+      }
+    },
+    [projectId]
+  )
+
+  useEffect(() => {
+    if (activeTab === 'evaluators') {
+      fetchAnnotatorTime(timePeriod)
+    }
+  }, [activeTab, timePeriod, fetchAnnotatorTime])
 
   // ---------------------------------------------------------------------------
   // Actions
@@ -529,7 +567,25 @@ export function ProjectDetailClient({
           {/* ============== ANNOTATORS TAB ============== */}
           <TabsContent value="evaluators" className="mt-6 space-y-4">
             <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold">Annotators</h2>
+              <div className="flex items-center gap-4">
+                <h2 className="text-lg font-semibold">Annotators</h2>
+                <div className="flex items-center gap-1 rounded-md border border-border bg-background p-0.5 text-xs">
+                  {(['week', 'month', 'all'] as const).map((p) => (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => setTimePeriod(p)}
+                      className={`px-2.5 py-1 rounded transition-colors ${
+                        timePeriod === p
+                          ? 'bg-primary text-primary-foreground'
+                          : 'text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      {p === 'week' ? 'This week' : p === 'month' ? 'This month' : 'All time'}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <div className="flex gap-2">
                 {project.studyflowStudyId && (
                   <ImportEvaluatorsDialog
@@ -651,12 +707,13 @@ export function ProjectDetailClient({
                   <TableHeader>
                     <TableRow>
                       <TableHead className="pl-5">Annotator</TableHead>
-                      <TableHead>Email</TableHead>
+                      <TableHead className="max-w-[10rem]">Email</TableHead>
                       <TableHead>Team</TableHead>
-                      <TableHead className="text-right">Assigned</TableHead>
-                      <TableHead className="text-right">Completed</TableHead>
-                      <TableHead>Progress</TableHead>
-                      <TableHead className="pr-5">Last Active</TableHead>
+                      <TableHead className="text-right w-20">Assigned</TableHead>
+                      <TableHead className="text-right w-20">Completed</TableHead>
+                      <TableHead className="w-28">Progress</TableHead>
+                      <TableHead className="text-right w-24 whitespace-nowrap">Time</TableHead>
+                      <TableHead className="pr-5 whitespace-nowrap">Last Active</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -679,7 +736,7 @@ export function ProjectDetailClient({
                               {low && <AlertTriangle className="h-3.5 w-3.5 text-destructive shrink-0" />}
                             </div>
                           </TableCell>
-                          <TableCell className="text-sm text-muted-foreground">{ev.user.email}</TableCell>
+                          <TableCell className="text-sm text-muted-foreground max-w-[10rem] truncate" title={ev.user.email}>{ev.user.email}</TableCell>
                           <TableCell>
                             <button
                               type="button"
@@ -697,7 +754,7 @@ export function ProjectDetailClient({
                           <TableCell className="text-right text-sm">{ev.assignedCount}</TableCell>
                           <TableCell className="text-right text-sm">{ev.completedCount}</TableCell>
                           <TableCell>
-                            <div className="flex items-center gap-2 min-w-32">
+                            <div className="flex items-center gap-2 min-w-28">
                               <Progress
                                 value={pct}
                                 className={`h-1.5 flex-1 ${low ? '[&>div]:bg-destructive' : ''}`}
@@ -707,7 +764,20 @@ export function ProjectDetailClient({
                               </span>
                             </div>
                           </TableCell>
-                          <TableCell className="pr-5 text-xs text-muted-foreground">{lastActive}</TableCell>
+                          {(() => {
+                            const t = timeData.get(ev.user.id)
+                            const annotation = t?.annotationSeconds ?? 0
+                            const other = t?.otherSeconds ?? 0
+                            return (
+                              <TableCell
+                                className="text-right text-xs tabular-nums whitespace-nowrap text-muted-foreground"
+                                title={`Annotating: ${formatDuration(annotation)} · Other: ${formatDuration(other)}`}
+                              >
+                                {formatDuration(annotation + other)}
+                              </TableCell>
+                            )
+                          })()}
+                          <TableCell className="pr-5 text-xs text-muted-foreground whitespace-nowrap">{lastActive}</TableCell>
                         </TableRow>
                       )
                     })}

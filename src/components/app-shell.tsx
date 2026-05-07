@@ -4,6 +4,7 @@ import { useState, useSyncExternalStore } from 'react'
 import { AppSidebar, type ProjectContext } from '@/components/app-sidebar'
 import { PanelLeft } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { useActivityTracker } from '@/hooks/use-activity-tracker'
 
 const STORAGE_KEY = 'sidebar-collapsed'
 
@@ -16,6 +17,7 @@ interface AppShellProps {
 const emptySubscribe = () => () => {}
 
 export function AppShell({ children, defaultCollapsed, projectContext }: AppShellProps) {
+  useActivityTracker()
   const mounted = useSyncExternalStore(emptySubscribe, () => true, () => false)
 
   const [collapsed, setCollapsed] = useState(() => {

@@ -129,7 +129,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         pathname.startsWith('/api/auth/') ||
         pathname === '/api/invite/accept' ||
         pathname === '/api/reset-password' ||
-        pathname === '/api/reset-password/accept'
+        pathname === '/api/reset-password/accept' ||
+        pathname.startsWith('/api/cron/')
 
       if (isPublicApiRoute) return true
       if (pathname === '/login' && isLoggedIn) {

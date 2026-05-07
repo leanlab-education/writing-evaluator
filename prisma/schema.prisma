@@ -28,6 +28,8 @@ model User {
   teamBatchReleases     TeamBatchRelease[] @relation("TeamBatchReleaseScorer")
   escalationsCreated    Escalation[]   @relation("EscalationEscalatedBy")
   escalationsResolved   Escalation[]   @relation("EscalationResolvedBy")
+  activitySessions      ActivitySession[]
+  activityDays          ActivityDaily[]
 }
 
 enum Role {
@@ -391,4 +393,55 @@ model Escalation {
   resolvedBy   User?            @relation("EscalationResolvedBy", fields: [resolvedById], references: [id], onDelete: SetNull)
 
   @@unique([teamReleaseId, feedbackItemId, dimensionId])
+}
+
+// ============================================
+// Activity tracking (platform time)
+// ============================================
+
+// ActivitySession is the source of truth for measured platform time.
+// Client opens a session via heartbeat when the page is visible AND the user
+// has been active in the last 5 min. Session ends on visibility change, idle
+// timeout, navigation/unload (sendBeacon), or server-side sweep when the
+// last heartbeat is older than the sweep threshold.
+//
+// Multi-tab / multi-device dedup happens at aggregation time: overlapping
+// intervals across sessions for the same user+bucket are merged before
+// summing into ActivityDaily.
+
+enum ActivityBucket {
+  ANNOTATION  // /evaluate/*
+  OTHER       // any other authenticated page
+}
+
+model ActivitySession {
+  id              String         @id @default(cuid())
+  userId          String
+  bucket          ActivityBucket
+  startedAt       DateTime
+  lastHeartbeatAt DateTime
+  endedAt         DateTime?
+  endReason       String?
+  userAgent       String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, startedAt])
+  @@index([endedAt, lastHeartbeatAt])
+}
+
+// ActivityDaily is a derived per-user-per-UTC-day rollup. The row for "today"
+// is recomputed on every heartbeat for that user; historical rows are
+// recomputed when sessions for that day change. Display queries sum these
+// rows over the requested period.
+model ActivityDaily {
+  userId            String
+  date              DateTime
+  annotationSeconds Int      @default(0)
+  otherSeconds      Int      @default(0)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, date])
+  @@index([date])
 }

@@ -15,6 +15,7 @@ import { FileText } from 'lucide-react'
 import { AppShell } from '@/components/app-shell'
 import { TeamAvatar, UserAvatar } from '@/components/user-avatar'
 import { generateName } from '@/lib/generate-name'
+import { MyTimeCard } from '@/components/my-time-card'
 
 interface BatchInfo {
   id: string
@@ -66,6 +67,8 @@ export function EvaluatorDashboard({
             Welcome, {userName}. Select a project to begin evaluating.
           </p>
         </div>
+
+        <MyTimeCard />
 
         {projects.length === 0 ? (
           <div className="py-12 text-center">
