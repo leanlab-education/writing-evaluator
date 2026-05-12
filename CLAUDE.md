@@ -244,7 +244,7 @@ APP_URL                     # This app's public URL (used in email links)
 
 **Study-specific** — only the Quill - Evaluators study uses this integration.
 
-- **Magic link login**: StudyFlow signs a JWT with `STUDYFLOW_LINK_SECRET` containing `email`, `name`, `project_id`. Writing Evaluator verifies the JWT at `/login` (requires `exp`, enforces 10-min `maxTokenAge`, validates `issuer: 'studyflow'` + `audience: 'writing-evaluator'`) and auto-creates evaluator accounts. **TODO**: StudyFlow side needs to add `.setIssuer('studyflow').setAudience('writing-evaluator')` to `generateWritingEvaluatorLink()` in `studyflow/src/lib/writing-evaluator.ts` — until then, magic link login will fail.
+- **Magic link login**: StudyFlow signs a JWT with `STUDYFLOW_LINK_SECRET` containing `email`, `name`, `project_id`. Writing Evaluator verifies the JWT at `/login` (requires `exp`, enforces 10-min `maxTokenAge`, validates `issuer: 'studyflow'` + `audience: 'writing-evaluator'`) and auto-creates evaluator accounts. StudyFlow already sets `.setIssuer('studyflow').setAudience('writing-evaluator')` in `generateWritingEvaluatorLink()`.
 - **Participant import**: Writing Evaluator can fetch active participants from StudyFlow via signed JWT to `STUDYFLOW_API_URL/api/studies/{studyId}/participants`. Admin uses "Import from StudyFlow" on the Evaluators tab.
 - **Study linking**: Each project has an optional `studyflowStudyId` field (set in Overview tab) that connects it to a StudyFlow study.
 - **Shared secret**: `STUDYFLOW_LINK_SECRET` must be the same value in both projects.
@@ -266,7 +266,7 @@ APP_URL                     # This app's public URL (used in email links)
 ## Remaining TODO
 
 - [ ] Connect to Replit for non-engineer access
-- [ ] **StudyFlow JWT iss/aud**: Add `.setIssuer('studyflow').setAudience('writing-evaluator')` to StudyFlow's `generateWritingEvaluatorLink()` — required before deploying this branch
+- [x] **StudyFlow JWT iss/aud**: Already implemented in StudyFlow's `generateWritingEvaluatorLink()`
 - [ ] **MFA**: Build opt-in TOTP (deferred — ASVS L2 requirement, planned as opt-in per user)
 - [ ] **Rate limiting**: Add to login, password reset, invite endpoints (use `@upstash/ratelimit` or similar)
 - [ ] **Server-side logging**: Add pino with security event coverage (auth, authz failures, exports)

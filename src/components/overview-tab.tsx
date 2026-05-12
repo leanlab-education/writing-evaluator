@@ -11,7 +11,7 @@ import {
   FileText, Layers,
 } from 'lucide-react'
 import { UserAvatar } from '@/components/user-avatar'
-import { generateName } from '@/lib/generate-name'
+import { generateName, displayAnnotatorName } from '@/lib/generate-name'
 import { batchStatusColors, batchStatusLabels } from '@/lib/status-colors'
 
 // ---------------------------------------------------------------------------
@@ -215,7 +215,7 @@ export function OverviewTab({
             <ClickableAlert
               type="warning"
               title={`${stalledAnnotators.length} ${stalledAnnotators.length === 1 ? 'annotator' : 'annotators'} below 50% completion`}
-              body={stalledAnnotators.map(a => generateName(a.user.id)).join(', ') + ' may be falling behind'}
+              body={stalledAnnotators.map(a => displayAnnotatorName(a.user.id, a.user.name)).join(', ') + ' may be falling behind'}
               linkLabel="View Annotators"
               onClick={() => onNavigateToTab('evaluators')}
             />
@@ -321,7 +321,7 @@ export function OverviewTab({
                     <UserAvatar name={ev.user.id} size={28} />
                     <div className="flex-1 min-w-0">
                       <div className="flex justify-between items-baseline mb-1">
-                        <span className="text-sm font-medium truncate text-foreground">{generateName(ev.user.id)}</span>
+                        <span className="text-sm font-medium truncate text-foreground">{displayAnnotatorName(ev.user.id, ev.user.name)}</span>
                         <span className={`text-xs font-semibold ml-2 shrink-0 ${low ? 'text-destructive' : 'text-muted-foreground'}`}>
                           {pct}%
                         </span>

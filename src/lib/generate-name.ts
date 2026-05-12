@@ -35,3 +35,8 @@ export function generateName(seed: string): string {
   const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
   return `${cap(adj)} ${cap(noun)}`
 }
+
+export function displayAnnotatorName(id: string, name: string | null | undefined): string {
+  const pseudo = generateName(id)
+  return name ? `${pseudo} (${name})` : pseudo
+}

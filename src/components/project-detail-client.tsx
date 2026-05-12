@@ -50,7 +50,7 @@ import { BatchCreator } from '@/components/batch-creator'
 import { ImportEvaluatorsDialog } from '@/components/import-evaluators-dialog'
 import { FeedbackItemsTab, type FeedbackItemRow } from '@/components/feedback-items-tab'
 import { UserAvatar } from '@/components/user-avatar'
-import { generateName } from '@/lib/generate-name'
+import { generateName, displayAnnotatorName } from '@/lib/generate-name'
 import { OverviewTab } from '@/components/overview-tab'
 import { Progress } from '@/components/ui/progress'
 import { formatDuration, type Period } from '@/lib/activity-tracker-config'
@@ -731,7 +731,7 @@ export function ProjectDetailClient({
                             <div className="flex items-center gap-2.5">
                               <UserAvatar name={ev.user.id} size={28} />
                               <div>
-                                <p className="text-sm font-medium text-foreground">{generateName(ev.user.id)}</p>
+                                <p className="text-sm font-medium text-foreground">{displayAnnotatorName(ev.user.id, ev.user.name)}</p>
                               </div>
                               {low && <AlertTriangle className="h-3.5 w-3.5 text-destructive shrink-0" />}
                             </div>
@@ -1068,7 +1068,7 @@ export function ProjectDetailClient({
               Assign team
               {teamPickerUser && (
                 <span className="block text-sm font-normal text-muted-foreground mt-1">
-                  {generateName(teamPickerUser.user.id)} · {teamPickerUser.user.email}
+                  {displayAnnotatorName(teamPickerUser.user.id, teamPickerUser.user.name)} · {teamPickerUser.user.email}
                 </span>
               )}
             </DialogTitle>

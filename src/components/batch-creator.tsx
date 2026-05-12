@@ -8,7 +8,7 @@ import { ChevronRight, Eye, EyeOff, Loader2, Plus } from 'lucide-react'
 import { batchStatusColors, batchStatusLabels } from '@/lib/status-colors'
 import { cn } from '@/lib/utils'
 import { TeamAvatar, UserAvatar } from '@/components/user-avatar'
-import { generateName } from '@/lib/generate-name'
+import { generateName, displayAnnotatorName } from '@/lib/generate-name'
 
 interface TeamReleaseRow {
   id: string
@@ -411,7 +411,7 @@ export function BatchCreator({
                                 <div key={m.id} className="flex items-center gap-1">
                                   <UserAvatar name={m.id} size={18} />
                                   <span className="text-[10px] text-muted-foreground capitalize">
-                                    {generateName(m.id)}
+                                    {displayAnnotatorName(m.id, m.name)}
                                   </span>
                                 </div>
                               ))}

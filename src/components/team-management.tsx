@@ -22,7 +22,7 @@ import {
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Plus, Loader2, Trash2 } from 'lucide-react'
 import { TeamAvatar, UserAvatar } from '@/components/user-avatar'
-import { generateName } from '@/lib/generate-name'
+import { generateName, displayAnnotatorName } from '@/lib/generate-name'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -410,7 +410,7 @@ export function TeamManagement({ projectId, evaluators, rubricDimensions }: Prop
                     {team.members.map((m) => (
                       <Badge key={m.id} variant="secondary" className="flex items-center gap-1.5 pl-1">
                         <UserAvatar name={m.userId} size={16} />
-                        {generateName(m.userId)}
+                        {displayAnnotatorName(m.userId, m.user.name)}
                       </Badge>
                     ))}
                   </div>
