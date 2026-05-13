@@ -62,7 +62,7 @@ export async function PATCH(
 
   const { projectId } = await params
   const body = await request.json()
-  const { studyflowStudyId } = body
+  const { studyflowStudyId, usePseudonyms } = body
 
   // Note: project.status is intentionally read-only via this endpoint. The
   // displayed status is derived from batch states in the UI; the DB column is
@@ -86,6 +86,7 @@ export async function PATCH(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const updateData: Record<string, any> = {}
   if (studyflowStudyId !== undefined) updateData.studyflowStudyId = studyflowStudyId || null
+  if (usePseudonyms !== undefined) updateData.usePseudonyms = Boolean(usePseudonyms)
 
   const project = await prisma.project.update({
     where: { id: projectId },

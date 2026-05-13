@@ -8,7 +8,7 @@ import { ChevronRight, Eye, EyeOff, Loader2, Plus } from 'lucide-react'
 import { batchStatusColors, batchStatusLabels } from '@/lib/status-colors'
 import { cn } from '@/lib/utils'
 import { TeamAvatar, UserAvatar } from '@/components/user-avatar'
-import { generateName, displayAnnotatorName } from '@/lib/generate-name'
+import { displayAnnotatorName } from '@/lib/generate-name'
 
 interface TeamReleaseRow {
   id: string
@@ -73,6 +73,7 @@ interface Props {
   batches: BatchRow[]
   onBatchesChange: (options?: { silent?: boolean }) => void | Promise<void>
   batchesLoading: boolean
+  usePseudonyms?: boolean
 }
 
 function getIrrColorClass(pct: number | null) {
@@ -90,6 +91,7 @@ export function BatchCreator({
   batches,
   onBatchesChange,
   batchesLoading,
+  usePseudonyms = true,
 }: Props) {
   const [localBatches, setLocalBatches] = useState<BatchRow[]>(batches)
   const [filterActivity, setFilterActivity] = useState('')
@@ -396,7 +398,7 @@ export function BatchCreator({
                               <div className="flex items-center gap-2 min-w-0">
                                 <TeamAvatar name={release.teamId} size={26} />
                                 <span className="text-xs font-semibold truncate capitalize">
-                                  {generateName(release.teamId)}
+                                  {release.teamName}
                                 </span>
                               </div>
                               {release.irr?.isApplicable && (
@@ -411,7 +413,7 @@ export function BatchCreator({
                                 <div key={m.id} className="flex items-center gap-1">
                                   <UserAvatar name={m.id} size={18} />
                                   <span className="text-[10px] text-muted-foreground capitalize">
-                                    {displayAnnotatorName(m.id, m.name)}
+                                    {displayAnnotatorName(m.id, m.name, usePseudonyms)}
                                   </span>
                                 </div>
                               ))}

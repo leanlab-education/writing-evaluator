@@ -63,6 +63,7 @@ model Project {
   status               ProjectStatus @default(SETUP)
   discrepancyThreshold Int           @default(1)
   studyflowStudyId     String?       // Links to a StudyFlow study for participant import
+  usePseudonyms        Boolean       @default(false)
   createdAt            DateTime      @default(now())
   updatedAt            DateTime      @updatedAt
 

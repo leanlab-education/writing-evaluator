@@ -22,7 +22,7 @@ import {
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Plus, Loader2, Trash2 } from 'lucide-react'
 import { TeamAvatar, UserAvatar } from '@/components/user-avatar'
-import { generateName, displayAnnotatorName } from '@/lib/generate-name'
+import { displayAnnotatorName } from '@/lib/generate-name'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -57,13 +57,14 @@ interface Props {
   projectId: string
   evaluators: EvaluatorOption[]
   rubricDimensions: DimensionInfo[]
+  usePseudonyms?: boolean
 }
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
-export function TeamManagement({ projectId, evaluators, rubricDimensions }: Props) {
+export function TeamManagement({ projectId, evaluators, rubricDimensions, usePseudonyms = true }: Props) {
   const [teams, setTeams] = useState<Team[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -383,7 +384,7 @@ export function TeamManagement({ projectId, evaluators, rubricDimensions }: Prop
                 <div className="flex items-center justify-between">
                   <CardTitle className="flex items-center gap-2 text-base">
                     <TeamAvatar name={team.id} size={26} />
-                    {generateName(team.id)}
+                    {team.name}
                   </CardTitle>
                   <Button
                     variant="ghost"
@@ -410,7 +411,7 @@ export function TeamManagement({ projectId, evaluators, rubricDimensions }: Prop
                     {team.members.map((m) => (
                       <Badge key={m.id} variant="secondary" className="flex items-center gap-1.5 pl-1">
                         <UserAvatar name={m.userId} size={16} />
-                        {displayAnnotatorName(m.userId, m.user.name)}
+                        {displayAnnotatorName(m.userId, m.user.name, usePseudonyms)}
                       </Badge>
                     ))}
                   </div>

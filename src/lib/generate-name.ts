@@ -36,7 +36,8 @@ export function generateName(seed: string): string {
   return `${cap(adj)} ${cap(noun)}`
 }
 
-export function displayAnnotatorName(id: string, name: string | null | undefined): string {
+export function displayAnnotatorName(id: string, name: string | null | undefined, usePseudonyms = true): string {
+  if (!usePseudonyms) return name || 'Unknown'
   const pseudo = generateName(id)
   return name ? `${pseudo} (${name})` : pseudo
 }

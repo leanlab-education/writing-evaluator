@@ -18,6 +18,7 @@ export async function GET() {
           name: true,
           description: true,
           status: true,
+          usePseudonyms: true,
         },
       },
     },
@@ -98,6 +99,7 @@ export async function GET() {
             include: {
               user: { select: { id: true, name: true, email: true } },
             },
+            orderBy: { user: { email: 'asc' } },
           },
         },
       },
@@ -108,20 +110,23 @@ export async function GET() {
     string,
     {
       teamId: string
+      teamName: string
       criteria: string[]
       partnerId: string | null
+      partnerName: string | null
     }
   >()
 
   for (const tm of teamMemberships) {
-    const partnerId = tm.team.members
-      .filter((m) => m.userId !== session.user!.id)
-      .map((m) => m.userId)[0] || null
+    const partner = tm.team.members
+      .filter((m) => m.userId !== session.user!.id)[0] || null
 
     teamByProject.set(tm.team.projectId, {
       teamId: tm.team.id,
+      teamName: tm.team.name,
       criteria: tm.team.dimensions.map((d) => d.dimension.label),
-      partnerId,
+      partnerId: partner?.userId || null,
+      partnerName: partner?.user.name || null,
     })
   }
 
