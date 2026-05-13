@@ -49,7 +49,7 @@ const PROJECT_SUB_NAV = [
   { value: 'batches', label: 'Batches', icon: <Layers className="size-3.5 shrink-0" /> },
   { value: 'items', label: 'Items', icon: <List className="size-3.5 shrink-0" /> },
   { value: 'rubric', label: 'Rubric', icon: <Ruler className="size-3.5 shrink-0" /> },
-  { value: 'export', label: 'Export', icon: <Download className="size-3.5 shrink-0" /> },
+  { value: 'export', label: 'Data', icon: <Download className="size-3.5 shrink-0" /> },
 ]
 
 function SidebarThemeToggle({ collapsed }: { collapsed: boolean }) {
