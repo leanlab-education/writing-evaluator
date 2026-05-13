@@ -545,7 +545,7 @@ export function ProjectDetailClient({
             <TabsTrigger value="batches">Batches</TabsTrigger>
             <TabsTrigger value="items">Items</TabsTrigger>
             <TabsTrigger value="rubric">Rubric</TabsTrigger>
-            <TabsTrigger value="export">Export</TabsTrigger>
+            <TabsTrigger value="export">Data</TabsTrigger>
           </TabsList>
 
           {/* ============== OVERVIEW TAB ============== */}
@@ -891,11 +891,33 @@ export function ProjectDetailClient({
           </TabsContent>
 
           {/* ============== EXPORT TAB ============== */}
-          <TabsContent value="export" className="mt-6 space-y-6">
-            <h2 className="text-lg font-semibold">Export Scores</h2>
-            <p className="text-sm text-muted-foreground">
-              Download evaluation scores as CSV files for analysis.
-            </p>
+          <TabsContent value="export" className="mt-6 space-y-8">
+
+            {/* Import section */}
+            <div>
+              <h2 className="text-lg font-semibold">Import</h2>
+              <p className="text-sm text-muted-foreground mt-1 mb-4">
+                Upload a CSV file to import feedback items into this project.
+              </p>
+              <Button
+                variant="outline"
+                onClick={() => router.push(`/admin/${projectId}/import`)}
+              >
+                <Upload className="mr-2 h-4 w-4" />
+                Import Data
+              </Button>
+            </div>
+
+            <div className="border-t border-border" />
+
+            {/* Export section */}
+            <div className="space-y-6">
+            <div>
+              <h2 className="text-lg font-semibold">Export</h2>
+              <p className="text-sm text-muted-foreground mt-1">
+                Download evaluation scores as CSV files for analysis.
+              </p>
+            </div>
 
             {/* Export filters */}
             {(() => {
@@ -1047,6 +1069,7 @@ export function ProjectDetailClient({
                   })()}
                 </CardContent>
               </Card>
+            </div>
             </div>
           </TabsContent>
         </Tabs>
