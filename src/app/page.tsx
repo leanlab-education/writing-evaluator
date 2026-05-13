@@ -21,6 +21,7 @@ export default async function HomePage() {
           name: true,
           description: true,
           status: true,
+          usePseudonyms: true,
         },
       },
     },

@@ -11,7 +11,7 @@ import {
   FileText, Layers,
 } from 'lucide-react'
 import { UserAvatar } from '@/components/user-avatar'
-import { generateName, displayAnnotatorName } from '@/lib/generate-name'
+import { displayAnnotatorName } from '@/lib/generate-name'
 import { batchStatusColors, batchStatusLabels } from '@/lib/status-colors'
 
 // ---------------------------------------------------------------------------
@@ -56,6 +56,8 @@ interface OverviewTabProps {
   projectId: string
   onNavigateToTab: (tab: string) => void
   onImportData: () => void
+  usePseudonyms: boolean
+  onTogglePseudonyms: (value: boolean) => void
 }
 
 // ---------------------------------------------------------------------------
@@ -166,6 +168,8 @@ export function OverviewTab({
   projectId,
   onNavigateToTab,
   onImportData,
+  usePseudonyms,
+  onTogglePseudonyms,
 }: OverviewTabProps) {
   const totalItems = project._count.feedbackItems
   const completionPct = totalItems > 0 ? Math.round((scoredItemCount / totalItems) * 100) : 0
@@ -215,7 +219,7 @@ export function OverviewTab({
             <ClickableAlert
               type="warning"
               title={`${stalledAnnotators.length} ${stalledAnnotators.length === 1 ? 'annotator' : 'annotators'} below 50% completion`}
-              body={stalledAnnotators.map(a => displayAnnotatorName(a.user.id, a.user.name)).join(', ') + ' may be falling behind'}
+              body={stalledAnnotators.map(a => displayAnnotatorName(a.user.id, a.user.name, usePseudonyms)).join(', ') + ' may be falling behind'}
               linkLabel="View Annotators"
               onClick={() => onNavigateToTab('evaluators')}
             />
@@ -321,7 +325,7 @@ export function OverviewTab({
                     <UserAvatar name={ev.user.id} size={28} />
                     <div className="flex-1 min-w-0">
                       <div className="flex justify-between items-baseline mb-1">
-                        <span className="text-sm font-medium truncate text-foreground">{displayAnnotatorName(ev.user.id, ev.user.name)}</span>
+                        <span className="text-sm font-medium truncate text-foreground">{displayAnnotatorName(ev.user.id, ev.user.name, usePseudonyms)}</span>
                         <span className={`text-xs font-semibold ml-2 shrink-0 ${low ? 'text-destructive' : 'text-muted-foreground'}`}>
                           {pct}%
                         </span>
@@ -336,6 +340,34 @@ export function OverviewTab({
           </CardContent>
         </Card>
 
+      </div>
+
+      {/* Project Settings */}
+      <div className="border-t border-border pt-6">
+        <h3 className="text-sm font-semibold text-foreground mb-3">Project Settings</h3>
+        <div className="flex items-center justify-between rounded-lg border border-border bg-background px-4 py-3">
+          <div>
+            <p className="text-sm font-medium">Annotator pseudonyms</p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Show generated names (e.g. &ldquo;Rustic Panda&rdquo;) instead of real names. Keeps annotators anonymous to each other.
+            </p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={usePseudonyms}
+            onClick={() => onTogglePseudonyms(!usePseudonyms)}
+            className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+              usePseudonyms ? 'bg-primary' : 'bg-muted'
+            }`}
+          >
+            <span
+              className={`pointer-events-none block h-5 w-5 rounded-full bg-background shadow-lg ring-0 transition-transform duration-200 ${
+                usePseudonyms ? 'translate-x-5' : 'translate-x-0'
+              }`}
+            />
+          </button>
+        </div>
       </div>
     </div>
   )

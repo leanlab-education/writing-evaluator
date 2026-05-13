@@ -50,7 +50,7 @@ import { BatchCreator } from '@/components/batch-creator'
 import { ImportEvaluatorsDialog } from '@/components/import-evaluators-dialog'
 import { FeedbackItemsTab, type FeedbackItemRow } from '@/components/feedback-items-tab'
 import { UserAvatar } from '@/components/user-avatar'
-import { generateName, displayAnnotatorName } from '@/lib/generate-name'
+import { displayAnnotatorName } from '@/lib/generate-name'
 import { OverviewTab } from '@/components/overview-tab'
 import { Progress } from '@/components/ui/progress'
 import { formatDuration, type Period } from '@/lib/activity-tracker-config'
@@ -93,6 +93,7 @@ interface Project {
   status: string
   discrepancyThreshold: number
   studyflowStudyId: string | null
+  usePseudonyms: boolean
   createdAt: string
   rubric: RubricDimension[]
   _count: {
@@ -254,6 +255,15 @@ export function ProjectDetailClient({
     } catch (err) {
       console.error('Failed to fetch project:', err)
     }
+  }, [projectId])
+
+  const handleTogglePseudonyms = useCallback(async (value: boolean) => {
+    setProject((p) => ({ ...p, usePseudonyms: value }))
+    await fetch(`/api/projects/${projectId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ usePseudonyms: value }),
+    })
   }, [projectId])
 
   const fetchEvaluators = useCallback(async () => {
@@ -561,6 +571,8 @@ export function ProjectDetailClient({
                 if (tab === 'batches') fetchBatches()
               }}
               onImportData={() => router.push(`/admin/${projectId}/import`)}
+              usePseudonyms={project.usePseudonyms}
+              onTogglePseudonyms={handleTogglePseudonyms}
             />
           </TabsContent>
 
@@ -649,7 +661,7 @@ export function ProjectDetailClient({
                                     : 'bg-background text-foreground border-border hover:border-primary/40'
                                 }`}
                               >
-                                {generateName(t.id)}
+                                {t.name}
                               </button>
                             ))}
                           </div>
@@ -731,7 +743,7 @@ export function ProjectDetailClient({
                             <div className="flex items-center gap-2.5">
                               <UserAvatar name={ev.user.id} size={28} />
                               <div>
-                                <p className="text-sm font-medium text-foreground">{displayAnnotatorName(ev.user.id, ev.user.name)}</p>
+                                <p className="text-sm font-medium text-foreground">{displayAnnotatorName(ev.user.id, ev.user.name, project.usePseudonyms)}</p>
                               </div>
                               {low && <AlertTriangle className="h-3.5 w-3.5 text-destructive shrink-0" />}
                             </div>
@@ -746,7 +758,7 @@ export function ProjectDetailClient({
                               }}
                               className="text-xs px-2 py-1 rounded-md border border-border bg-background hover:border-primary/40 hover:bg-muted/40 transition-all duration-200 text-foreground"
                             >
-                              {ev.team ? generateName(ev.team.id) : (
+                              {ev.team ? ev.team.name : (
                                 <span className="text-muted-foreground">Assign team</span>
                               )}
                             </button>
@@ -801,6 +813,7 @@ export function ProjectDetailClient({
                 label: d.label,
                 sortOrder: d.sortOrder,
               }))}
+              usePseudonyms={project.usePseudonyms}
             />
           </TabsContent>
 
@@ -815,6 +828,7 @@ export function ProjectDetailClient({
               batches={batches}
               onBatchesChange={fetchBatches}
               batchesLoading={batchesLoading}
+              usePseudonyms={project.usePseudonyms}
             />
           </TabsContent>
 
@@ -1091,7 +1105,7 @@ export function ProjectDetailClient({
               Assign team
               {teamPickerUser && (
                 <span className="block text-sm font-normal text-muted-foreground mt-1">
-                  {displayAnnotatorName(teamPickerUser.user.id, teamPickerUser.user.name)} · {teamPickerUser.user.email}
+                  {displayAnnotatorName(teamPickerUser.user.id, teamPickerUser.user.name, project.usePseudonyms)} · {teamPickerUser.user.email}
                 </span>
               )}
             </DialogTitle>
@@ -1132,7 +1146,7 @@ export function ProjectDetailClient({
                     } disabled:opacity-50 disabled:cursor-not-allowed`}
                   >
                     <span className="text-sm font-medium text-foreground">
-                      {generateName(t.id)}
+                      {t.name}
                     </span>
                     {selected && <CheckCircle className="h-4 w-4 text-primary" />}
                   </button>

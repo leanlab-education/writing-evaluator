@@ -30,8 +30,10 @@ interface BatchInfo {
 
 interface TeamInfo {
   teamId: string
+  teamName: string
   criteria: string[]
   partnerId: string | null
+  partnerName: string | null
 }
 
 interface EvaluatorProject {
@@ -42,6 +44,7 @@ interface EvaluatorProject {
     name: string
     description: string | null
     status: string
+    usePseudonyms: boolean
   }
   assignmentCount: number
   completedCount: number
@@ -121,7 +124,7 @@ export function EvaluatorDashboard({
                     {ep.team && (
                       <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md bg-muted px-3 py-2 text-xs">
                         <TeamAvatar name={ep.team.teamId} size={20} />
-                        <span className="font-medium">{generateName(ep.team.teamId)}</span>
+                        <span className="font-medium">{ep.team.teamName}</span>
                         <span className="text-muted-foreground">&middot;</span>
                         <span className="text-muted-foreground">
                           Criteria: {ep.team.criteria.join(', ')}
@@ -132,7 +135,9 @@ export function EvaluatorDashboard({
                             <span className="text-muted-foreground">Partner:</span>
                             <UserAvatar name={ep.team.partnerId} size={16} />
                             <span className="text-muted-foreground">
-                              {generateName(ep.team.partnerId)}
+                              {ep.project.usePseudonyms
+                                ? generateName(ep.team.partnerId)
+                                : (ep.team.partnerName || 'Unknown')}
                             </span>
                           </>
                         )}
