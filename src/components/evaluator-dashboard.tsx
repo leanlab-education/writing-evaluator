@@ -13,8 +13,6 @@ import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { FileText } from 'lucide-react'
 import { AppShell } from '@/components/app-shell'
-import { TeamAvatar, UserAvatar } from '@/components/user-avatar'
-import { generateName } from '@/lib/generate-name'
 import { MyTimeCard } from '@/components/my-time-card'
 
 interface BatchInfo {
@@ -95,7 +93,8 @@ export function EvaluatorDashboard({
               return (
                 <Card
                   key={ep.id}
-                  className="transition-all duration-200 hover:shadow-sm hover:ring-1 hover:ring-primary/10"
+                  className="cursor-pointer transition-all duration-200 hover:shadow-sm hover:ring-1 hover:ring-primary/10"
+                  onClick={() => router.push(`/projects/${ep.project.id}`)}
                 >
                   <CardHeader className="pb-2">
                     <div className="flex items-start justify-between gap-2">
@@ -120,130 +119,18 @@ export function EvaluatorDashboard({
                     )}
                   </CardHeader>
                   <CardContent>
-                    {/* Team info */}
-                    {ep.team && (
-                      <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md bg-muted px-3 py-2 text-xs">
-                        <TeamAvatar name={ep.team.teamId} size={20} />
-                        <span className="font-medium">{ep.team.teamName}</span>
-                        <span className="text-muted-foreground">&middot;</span>
-                        <span className="text-muted-foreground">
-                          Criteria: {ep.team.criteria.join(', ')}
-                        </span>
-                        {ep.team.partnerId && (
-                          <>
-                            <span className="text-muted-foreground">&middot;</span>
-                            <span className="text-muted-foreground">Partner:</span>
-                            <UserAvatar name={ep.team.partnerId} size={16} />
-                            <span className="text-muted-foreground">
-                              {ep.project.usePseudonyms
-                                ? generateName(ep.team.partnerId)
-                                : (ep.team.partnerName || 'Unknown')}
-                            </span>
-                          </>
-                        )}
+                    <div className="flex items-center gap-3">
+                      <div className="flex-1">
+                        <Progress value={pct} />
                       </div>
-                    )}
-
-                    {ep.batches.length > 0 ? (
-                      // Batch-based view
-                      <div className="space-y-3">
-                        {ep.batches.map((batch) => {
-                          const batchPct =
-                            batch.itemCount > 0
-                              ? Math.round(
-                                  (batch.scoredCount / batch.itemCount) * 100
-                                )
-                              : 0
-                          const batchComplete = batchPct === 100
-                          return (
-                            <div
-                              key={batch.id}
-                              className="flex items-center gap-3"
-                            >
-                              <div className="flex-1">
-                                <div className="mb-1 flex items-center justify-between">
-                                  <span className="text-xs font-medium">
-                                    {batch.name}
-                                  </span>
-                                  <span className="text-xs text-muted-foreground">
-                                    {batch.status === 'RECONCILING' && batch.discrepancyCount != null
-                                      ? `${batch.reconciledCount ?? 0}/${batch.discrepancyCount} reconciled`
-                                      : `${batch.scoredCount}/${batch.itemCount}`}
-                                  </span>
-                                </div>
-                                <Progress
-                                  value={
-                                    batch.status === 'RECONCILING' && batch.discrepancyCount
-                                      ? Math.round(((batch.reconciledCount ?? 0) / batch.discrepancyCount) * 100)
-                                      : batchPct
-                                  }
-                                />
-                              </div>
-                              {batch.status === 'RECONCILING' ? (
-                                <Button
-                                  size="sm"
-                                  variant="default"
-                                  onClick={() =>
-                                    router.push(
-                                      `/reconcile/${ep.project.id}?batchId=${batch.id}&releaseId=${batch.releaseId}`
-                                    )
-                                  }
-                                >
-                                  Reconcile
-                                </Button>
-                              ) : (
-                              <Button
-                                size="sm"
-                                variant={batchComplete ? 'outline' : 'default'}
-                                onClick={() =>
-                                  router.push(
-                                    `/evaluate/${ep.project.id}?batchId=${batch.id}`
-                                  )
-                                }
-                                disabled={
-                                  batch.status !== 'SCORING' ||
-                                  batchComplete
-                                }
-                              >
-                                {batchComplete
-                                  ? 'Done'
-                                  : batch.status !== 'SCORING'
-                                    ? batch.status === 'COMPLETE'
-                                      ? 'Closed'
-                                      : 'Not Open'
-                                    : batch.scoredCount > 0
-                                      ? 'Continue'
-                                      : 'Start'}
-                              </Button>
-                              )}
-                            </div>
-                          )
-                        })}
-                      </div>
-                    ) : (
-                      // Legacy per-item view
-                      <>
-                        <div className="mb-3">
-                          <Progress value={pct} />
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <span className="text-sm text-muted-foreground">
-                            {ep.completedCount} of {ep.assignmentCount} items
-                            scored
-                          </span>
-                          <Button
-                            size="sm"
-                            onClick={() =>
-                              router.push(`/evaluate/${ep.project.id}`)
-                            }
-                            disabled={isComplete}
-                          >
-                            {isComplete
-                              ? 'All Done'
-                              : 'Start Evaluating'}
-                          </Button>
-                        </div>
-                      </>
+                      <span className="text-sm text-muted-foreground">
+                        {ep.completedCount}/{ep.assignmentCount} scored
+                      </span>
+                    </div>
+                    {ep.batches.length > 0 && (
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        {ep.batches.filter(b => b.status === 'SCORING').length} batch{ep.batches.filter(b => b.status === 'SCORING').length !== 1 ? 'es' : ''} open
+                      </p>
                     )}
                   </CardContent>
                 </Card>
