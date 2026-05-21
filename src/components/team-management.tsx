@@ -224,7 +224,7 @@ export function TeamManagement({ projectId, evaluators, rubricDimensions, usePse
             <Plus className="mr-2 h-4 w-4" />
             Create Team
           </DialogTrigger>
-          <DialogContent className="max-w-md">
+          <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-md overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Create Annotator Team</DialogTitle>
             </DialogHeader>
