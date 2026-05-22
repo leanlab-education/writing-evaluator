@@ -1,5 +1,6 @@
 import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/db'
+import { canAdminProject } from '@/lib/authorization'
 import { FeedbackSource } from '@/generated/prisma/client'
 import { NextRequest, NextResponse } from 'next/server'
 
@@ -18,7 +19,7 @@ export async function GET(request: NextRequest) {
   }
 
   const batchId = request.nextUrl.searchParams.get('batchId')
-  const isAdmin = session.user.role === 'ADMIN'
+  const isAdmin = await canAdminProject(session.user.id, session.user.role, projectId)
 
   // Per-batch slot filter: when an annotator opens a non-double-scored regular
   // batch, they only see their slot's half of the items.
@@ -176,15 +177,15 @@ export async function POST(request: Request) {
   if (!session?.user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
-  if (session.user.role !== 'ADMIN') {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  }
-
   const body = await request.json()
   const { projectId, items, filename } = body as {
     projectId?: string
     items?: unknown[]
     filename?: string
+  }
+
+  if (!projectId || !(await canAdminProject(session.user.id, session.user.role, projectId))) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
   if (!projectId || !Array.isArray(items) || items.length === 0) {

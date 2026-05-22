@@ -2,6 +2,7 @@ import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/db'
 import { notFound, redirect } from 'next/navigation'
 import { BatchBuilderPage } from '@/components/batch-builder-page'
+import { canAdminProject } from '@/lib/authorization'
 
 export default async function NewBatchPage({
   params,
@@ -10,9 +11,9 @@ export default async function NewBatchPage({
 }) {
   const session = await auth()
   if (!session?.user) redirect('/login')
-  if (session.user.role !== 'ADMIN') redirect('/')
 
   const { projectId } = await params
+  if (!(await canAdminProject(session.user.id, session.user.role, projectId))) redirect('/')
 
   const [project, items] = await Promise.all([
     prisma.project.findUnique({

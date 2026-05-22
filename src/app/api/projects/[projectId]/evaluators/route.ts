@@ -1,4 +1,5 @@
 import { auth } from '@/lib/auth'
+import { canAdminProject } from '@/lib/authorization'
 import { prisma } from '@/lib/db'
 import { countForAssignment, loadSlotMaps } from '@/lib/evaluator-stats'
 import { NextRequest, NextResponse } from 'next/server'
@@ -11,11 +12,11 @@ export async function GET(
   if (!session?.user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
-  if (session.user.role !== 'ADMIN') {
+  const { projectId } = await params
+
+  if (!(await canAdminProject(session.user.id, session.user.role, projectId))) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
-
-  const { projectId } = await params
 
   const evaluators = await prisma.projectEvaluator.findMany({
     where: { projectId },
@@ -104,6 +105,7 @@ export async function GET(
   const result = evaluators.map((ev) => ({
     id: ev.id,
     user: ev.user,
+    role: ev.role,
     assignedCount: assignedByUser.get(ev.user.id) ?? 0,
     completedCount: completedByUser.get(ev.user.id) ?? 0,
     lastScoredAt: lastScoredByUser.get(ev.user.id) ?? null,
@@ -121,11 +123,12 @@ export async function POST(
   if (!session?.user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
-  if (session.user.role !== 'ADMIN') {
+  const { projectId } = await params
+
+  if (!(await canAdminProject(session.user.id, session.user.role, projectId))) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
-  const { projectId } = await params
   const body = await request.json()
   const { userId } = body
 

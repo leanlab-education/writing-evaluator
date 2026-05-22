@@ -2,6 +2,7 @@ import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/db'
 import { redirect } from 'next/navigation'
 import { EvaluateClient } from './evaluate-client'
+import { canAdminProject } from '@/lib/authorization'
 
 export default async function EvaluatePage({
   params,
@@ -16,9 +17,9 @@ export default async function EvaluatePage({
   const { projectId } = await params
   const { batchId } = await searchParams
 
-  // Non-admins: verify they have a scorable batch in this project and
-  // that the batch hasn't been hidden by an admin.
-  if (session.user.role !== 'ADMIN') {
+  const isAdmin = await canAdminProject(session.user.id, session.user.role, projectId)
+
+  if (!isAdmin) {
     if (batchId) {
       const batch = await prisma.batch.findUnique({
         where: { id: batchId },

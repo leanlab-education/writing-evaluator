@@ -152,10 +152,11 @@ enum FeedbackSource {
 // ============================================
 
 model ProjectEvaluator {
-  id        String   @id @default(cuid())
+  id        String               @id @default(cuid())
   projectId String
   userId    String
-  createdAt DateTime @default(now())
+  role      ProjectEvaluatorRole @default(EVALUATOR)
+  createdAt DateTime             @default(now())
 
   project     Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
   user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -183,6 +184,11 @@ enum AssignmentStatus {
   PENDING
   IN_PROGRESS
   COMPLETE
+}
+
+enum ProjectEvaluatorRole {
+  EVALUATOR
+  PROJECT_ADMIN
 }
 
 // ============================================

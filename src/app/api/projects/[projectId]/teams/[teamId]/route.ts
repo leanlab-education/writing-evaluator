@@ -1,4 +1,5 @@
 import { auth } from '@/lib/auth'
+import { canAdminProject } from '@/lib/authorization'
 import { prisma } from '@/lib/db'
 import { NextRequest, NextResponse } from 'next/server'
 
@@ -11,11 +12,12 @@ export async function PATCH(request: Request, { params }: { params: Params }) {
   if (!session?.user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
-  if (session.user.role !== 'ADMIN') {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  }
 
   const { projectId, teamId } = await params
+
+  if (!(await canAdminProject(session.user.id, session.user.role, projectId))) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
   const body = await request.json()
   const { name, memberUserIds, dimensionIds } = body as {
     name?: string
@@ -179,11 +181,12 @@ export async function DELETE(
   if (!session?.user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
-  if (session.user.role !== 'ADMIN') {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  }
 
   const { projectId, teamId } = await params
+
+  if (!(await canAdminProject(session.user.id, session.user.role, projectId))) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
 
   const team = await prisma.evaluatorTeam.findUnique({
     where: { id: teamId },

@@ -1,4 +1,5 @@
 import { auth } from '@/lib/auth'
+import { canAdminProject } from '@/lib/authorization'
 import { prisma } from '@/lib/db'
 import { NextRequest, NextResponse } from 'next/server'
 
@@ -42,7 +43,7 @@ export async function POST(
       teamReleaseId: releaseId,
     },
   })
-  if (!assignment && session.user.role !== 'ADMIN') {
+  if (!assignment && !(await canAdminProject(session.user.id, session.user.role, projectId))) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
@@ -195,7 +196,7 @@ export async function DELETE(
   }
   if (
     escalation.escalatedById !== session.user.id &&
-    session.user.role !== 'ADMIN'
+    !(await canAdminProject(session.user.id, session.user.role, projectId))
   ) {
     return NextResponse.json(
       { error: 'Only the escalator (or an admin) can withdraw an escalation' },

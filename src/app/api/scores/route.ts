@@ -1,5 +1,6 @@
 import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/db'
+import { canAdminProject } from '@/lib/authorization'
 import { maybeAdvanceReleaseAfterScore } from '@/lib/reconciliation'
 import { NextRequest, NextResponse } from 'next/server'
 
@@ -18,9 +19,8 @@ export async function GET(request: NextRequest) {
   }
 
   const feedbackItemId = request.nextUrl.searchParams.get('feedbackItemId')
-  const isAdmin = session.user.role === 'ADMIN'
+  const isAdmin = await canAdminProject(session.user.id, session.user.role, projectId)
 
-  // Evaluators can only access projects they're assigned to
   if (!isAdmin) {
     const membership = await prisma.projectEvaluator.findUnique({
       where: { projectId_userId: { projectId, userId: session.user.id } },
@@ -34,7 +34,6 @@ export async function GET(request: NextRequest) {
     where: {
       feedbackItem: { projectId },
       ...(feedbackItemId ? { feedbackItemId } : {}),
-      // Evaluators only see their own scores
       ...(!isAdmin ? { userId: session.user.id } : {}),
     },
     include: {
@@ -86,6 +85,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
+  const isProjectAdmin = await canAdminProject(session.user.id, session.user.role, feedbackItem.projectId)
+
   // Verify batch is in a scoreable state and not hidden from this user
   let releaseId: string | null = null
   if (feedbackItem.batchId) {
@@ -115,10 +116,10 @@ export async function POST(request: Request) {
     if (!batch) {
       return NextResponse.json({ error: 'Batch not found' }, { status: 404 })
     }
-    if (batch.isHidden && session.user.role !== 'ADMIN') {
+    if (batch.isHidden && !isProjectAdmin) {
       return NextResponse.json({ error: 'Scoring is not open for this batch' }, { status: 403 })
     }
-    if (!assignment && session.user.role !== 'ADMIN') {
+    if (!assignment && !isProjectAdmin) {
       return NextResponse.json({ error: 'Scoring is not open for this batch' }, { status: 403 })
     }
     if (
@@ -228,6 +229,8 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
+  const isPutAdmin = await canAdminProject(session.user.id, session.user.role, feedbackItem.projectId)
+
   // Verify batch is in a scoreable state and not hidden from this user
   let releaseId: string | null = null
   if (feedbackItem.batchId) {
@@ -257,10 +260,10 @@ export async function PUT(request: Request) {
     if (!batch) {
       return NextResponse.json({ error: 'Batch not found' }, { status: 404 })
     }
-    if (batch.isHidden && session.user.role !== 'ADMIN') {
+    if (batch.isHidden && !isPutAdmin) {
       return NextResponse.json({ error: 'Scoring is not open for this batch' }, { status: 403 })
     }
-    if (!assignment && session.user.role !== 'ADMIN') {
+    if (!assignment && !isPutAdmin) {
       return NextResponse.json({ error: 'Scoring is not open for this batch' }, { status: 403 })
     }
     if (

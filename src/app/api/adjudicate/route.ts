@@ -1,5 +1,6 @@
 import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/db'
+import { isGlobalAdmin, getAdminProjectIds } from '@/lib/authorization'
 import { maybeCompleteReleaseReconciliation } from '@/lib/reconciliation'
 import { getReleaseOwnerUserId } from '@/lib/team-batch-releases'
 import { NextRequest, NextResponse } from 'next/server'
@@ -14,12 +15,17 @@ export async function GET(_request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const isAdmin = session.user.role === 'ADMIN'
+  const globalAdmin = isGlobalAdmin(session.user.role)
+  const adminProjectIds = globalAdmin ? [] : await getAdminProjectIds(session.user.id)
 
   const escalations = await prisma.escalation.findMany({
     where: {
       resolvedAt: null,
-      ...(isAdmin ? {} : { batch: { adjudicatorId: session.user.id } }),
+      ...(globalAdmin
+        ? {}
+        : adminProjectIds.length > 0
+          ? { OR: [{ batch: { adjudicatorId: session.user.id } }, { batch: { projectId: { in: adminProjectIds } } }] }
+          : { batch: { adjudicatorId: session.user.id } }),
     },
     include: {
       batch: {
@@ -204,7 +210,7 @@ export async function POST(request: NextRequest) {
   const escalations = await prisma.escalation.findMany({
     where: { id: { in: ids }, resolvedAt: null },
     include: {
-      batch: { select: { id: true, adjudicatorId: true } },
+      batch: { select: { id: true, projectId: true, adjudicatorId: true } },
       teamRelease: {
         include: {
           team: {
@@ -228,11 +234,11 @@ export async function POST(request: NextRequest) {
     )
   }
 
-  // Authorize: current user must be the adjudicator on every batch touched,
-  // OR an admin.
-  const isAdmin = session.user.role === 'ADMIN'
+  const globalAdmin = isGlobalAdmin(session.user.role)
+  const postAdminProjectIds = globalAdmin ? null : new Set(await getAdminProjectIds(session.user.id))
   for (const esc of escalations) {
-    if (!isAdmin && esc.batch.adjudicatorId !== session.user.id) {
+    const isAdminForThis = globalAdmin || (postAdminProjectIds?.has(esc.batch.projectId) ?? false)
+    if (!isAdminForThis && esc.batch.adjudicatorId !== session.user.id) {
       return NextResponse.json(
         { error: 'You are not the adjudicator for this batch' },
         { status: 403 }

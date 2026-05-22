@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 import { prisma } from '@/lib/db'
 import { EvaluatorDashboard } from '@/components/evaluator-dashboard'
 import { countForAssignment, loadSlotMaps } from '@/lib/evaluator-stats'
+import { getAdminProjectIds } from '@/lib/authorization'
 
 export default async function HomePage() {
   const session = await auth()
@@ -171,11 +172,11 @@ export default async function HomePage() {
     })
   }
 
+  const adminProjectIdList = await getAdminProjectIds(session.user.id)
+  const adminProjectIdSet = new Set(adminProjectIdList)
+
   const projects = evaluatorProjects.map((ep) => {
     const batches = batchesByProject.get(ep.projectId) || []
-    // Project-level totals are derived from the user's per-batch slices, not
-    // the legacy Assignment table — so the percentage matches what the user
-    // actually has to score.
     const assignmentCount = batches.reduce((sum, b) => sum + b.itemCount, 0)
     const completedCount = batches.reduce((sum, b) => sum + b.scoredCount, 0)
     return {
@@ -185,6 +186,7 @@ export default async function HomePage() {
       assignmentCount,
       completedCount,
       batches,
+      isProjectAdmin: adminProjectIdSet.has(ep.projectId),
     }
   })
 
@@ -192,6 +194,7 @@ export default async function HomePage() {
     <EvaluatorDashboard
       projects={projects}
       userName={session.user.name || session.user.email || 'Annotator'}
+      hasAdminProjects={adminProjectIdList.length > 0}
     />
   )
 }

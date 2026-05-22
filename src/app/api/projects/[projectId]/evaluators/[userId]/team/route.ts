@@ -1,4 +1,5 @@
 import { auth } from '@/lib/auth'
+import { canAdminProject } from '@/lib/authorization'
 import { prisma } from '@/lib/db'
 import { NextResponse } from 'next/server'
 
@@ -18,11 +19,11 @@ export async function PUT(request: Request, { params }: { params: Params }) {
   if (!session?.user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
-  if (session.user.role !== 'ADMIN') {
+  const { projectId, userId } = await params
+
+  if (!(await canAdminProject(session.user.id, session.user.role, projectId))) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
-
-  const { projectId, userId } = await params
   const body = await request.json().catch(() => ({}))
   const teamId: string | null = body?.teamId ?? null
 

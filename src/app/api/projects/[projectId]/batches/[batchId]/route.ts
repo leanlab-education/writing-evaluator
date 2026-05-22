@@ -1,4 +1,5 @@
 import { auth } from '@/lib/auth'
+import { canAdminProject } from '@/lib/authorization'
 import { prisma } from '@/lib/db'
 import { NextRequest, NextResponse } from 'next/server'
 
@@ -7,11 +8,15 @@ export async function PATCH(
   { params }: { params: Promise<{ projectId: string; batchId: string }> }
 ) {
   const session = await auth()
-  if (!session?.user || session.user.role !== 'ADMIN') {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!session?.user) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
   const { projectId, batchId } = await params
+
+  if (!(await canAdminProject(session.user.id, session.user.role, projectId))) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
   const body = await request.json()
   const { status, adjudicatorId, isHidden } = body as {
     status?: string
@@ -79,11 +84,15 @@ export async function DELETE(
   { params }: { params: Promise<{ projectId: string; batchId: string }> }
 ) {
   const session = await auth()
-  if (!session?.user || session.user.role !== 'ADMIN') {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!session?.user) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
   const { projectId, batchId } = await params
+
+  if (!(await canAdminProject(session.user.id, session.user.role, projectId))) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
 
   const batch = await prisma.batch.findUnique({
     where: { id: batchId },

@@ -1,4 +1,5 @@
 import { auth } from '@/lib/auth'
+import { canAdminProject } from '@/lib/authorization'
 import { prisma } from '@/lib/db'
 import { compareFeedbackIds } from '@/lib/feedback-id'
 import { computeBatchIRRSummary } from '@/lib/irr'
@@ -35,7 +36,7 @@ export async function GET(
 
   const { projectId } = await params
 
-  if (session.user.role !== 'ADMIN') {
+  if (!(await canAdminProject(session.user.id, session.user.role, projectId))) {
     const membership = await prisma.projectEvaluator.findUnique({
       where: { projectId_userId: { projectId, userId: session.user.id } },
     })
@@ -323,11 +324,12 @@ export async function POST(
   if (!session?.user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
-  if (session.user.role !== 'ADMIN') {
+  const { projectId } = await params
+
+  if (!(await canAdminProject(session.user.id, session.user.role, projectId))) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
-  const { projectId } = await params
   const body = await request.json()
 
   if (body.mode === 'auto') {

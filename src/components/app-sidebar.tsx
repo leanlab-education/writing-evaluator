@@ -34,6 +34,7 @@ interface AppSidebarProps {
   collapsed: boolean
   onToggle: () => void
   projectContext?: ProjectContext
+  isProjectAdmin?: boolean
 }
 
 interface NavItem {
@@ -81,13 +82,14 @@ function SidebarThemeToggle({ collapsed }: { collapsed: boolean }) {
   )
 }
 
-export function AppSidebar({ collapsed, onToggle, projectContext }: AppSidebarProps) {
+export function AppSidebar({ collapsed, onToggle, projectContext, isProjectAdmin }: AppSidebarProps) {
   const { data: session } = useSession()
   const pathname = usePathname()
 
-  const isAdmin = session?.user?.role === 'ADMIN'
+  const isGlobalAdmin = session?.user?.role === 'ADMIN'
+  const showAdminNav = isGlobalAdmin || isProjectAdmin || pathname.startsWith('/admin/')
 
-  const navItems: NavItem[] = isAdmin
+  const navItems: NavItem[] = isGlobalAdmin
     ? [
         {
           href: '/admin',
@@ -100,13 +102,26 @@ export function AppSidebar({ collapsed, onToggle, projectContext }: AppSidebarPr
           icon: <UsersRound className="size-4 shrink-0" />,
         },
       ]
-    : [
-        {
-          href: '/',
-          label: 'My Projects',
-          icon: <BookOpen className="size-4 shrink-0" />,
-        },
-      ]
+    : showAdminNav
+      ? [
+          {
+            href: '/',
+            label: 'My Projects',
+            icon: <BookOpen className="size-4 shrink-0" />,
+          },
+          {
+            href: '/admin',
+            label: 'Admin',
+            icon: <LayoutGrid className="size-4 shrink-0" />,
+          },
+        ]
+      : [
+          {
+            href: '/',
+            label: 'My Projects',
+            icon: <BookOpen className="size-4 shrink-0" />,
+          },
+        ]
 
   function isActive(href: string) {
     if (href === '/admin/accounts') return pathname === '/admin/accounts'
@@ -134,7 +149,7 @@ export function AppSidebar({ collapsed, onToggle, projectContext }: AppSidebarPr
         ) : (
           <>
             <Link
-              href={isAdmin ? '/admin' : '/'}
+              href={isGlobalAdmin ? '/admin' : '/'}
               className="flex items-center gap-2 text-sidebar-foreground transition-colors hover:text-sidebar-primary"
             >
               <PenTool className="size-5 shrink-0" />

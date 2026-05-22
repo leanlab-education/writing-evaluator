@@ -1,4 +1,5 @@
 import { auth } from '@/lib/auth'
+import { canAdminProject } from '@/lib/authorization'
 import { prisma } from '@/lib/db'
 import { maybeCompleteReleaseReconciliation } from '@/lib/reconciliation'
 import {
@@ -33,7 +34,7 @@ export async function POST(
     return NextResponse.json({ error: 'releaseId is required' }, { status: 400 })
   }
 
-  if (session.user.role !== 'ADMIN') {
+  if (!(await canAdminProject(session.user.id, session.user.role, projectId))) {
     const assignment = await prisma.batchAssignment.findFirst({
       where: {
         batchId,

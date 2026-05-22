@@ -1,4 +1,5 @@
 import { auth } from '@/lib/auth'
+import { canAdminProject } from '@/lib/authorization'
 import { prisma } from '@/lib/db'
 import { fetchStudyFlowParticipants } from '@/lib/studyflow-client'
 import { NextRequest, NextResponse } from 'next/server'
@@ -9,11 +10,15 @@ export async function GET(
   { params }: { params: Promise<{ projectId: string }> }
 ) {
   const session = await auth()
-  if (!session?.user || session.user.role !== 'ADMIN') {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!session?.user) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
   const { projectId } = await params
+
+  if (!(await canAdminProject(session.user.id, session.user.role, projectId))) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
   const project = await prisma.project.findUnique({
     where: { id: projectId },
     select: { studyflowStudyId: true },
@@ -54,11 +59,15 @@ export async function POST(
   { params }: { params: Promise<{ projectId: string }> }
 ) {
   const session = await auth()
-  if (!session?.user || session.user.role !== 'ADMIN') {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!session?.user) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
   const { projectId } = await params
+
+  if (!(await canAdminProject(session.user.id, session.user.role, projectId))) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
   const { participants } = await request.json()
 
   if (!Array.isArray(participants) || participants.length === 0) {

@@ -1,4 +1,5 @@
 import { auth } from '@/lib/auth'
+import { canAdminProject } from '@/lib/authorization'
 import { prisma } from '@/lib/db'
 import { NextRequest, NextResponse } from 'next/server'
 
@@ -11,11 +12,12 @@ export async function POST(
   if (!session?.user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
-  if (session.user.role !== 'ADMIN') {
+  const { projectId, batchId } = await params
+
+  if (!(await canAdminProject(session.user.id, session.user.role, projectId))) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
-  const { batchId } = await params
   const body = await request.json()
   const { userIds, scoringRole = 'PRIMARY' } = body as {
     userIds: string[]
@@ -84,11 +86,12 @@ export async function DELETE(
   if (!session?.user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
-  if (session.user.role !== 'ADMIN') {
+  const { projectId, batchId } = await params
+
+  if (!(await canAdminProject(session.user.id, session.user.role, projectId))) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
-  const { batchId } = await params
   const userId = request.nextUrl.searchParams.get('userId')
 
   if (!userId) {

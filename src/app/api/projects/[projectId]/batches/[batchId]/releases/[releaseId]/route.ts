@@ -1,4 +1,5 @@
 import { auth } from '@/lib/auth'
+import { canAdminProject } from '@/lib/authorization'
 import { prisma } from '@/lib/db'
 import {
   syncBatchAssignmentsForRelease,
@@ -69,11 +70,15 @@ export async function PATCH(
   }
 ) {
   const session = await auth()
-  if (!session?.user || session.user.role !== 'ADMIN') {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!session?.user) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
   const { projectId, batchId, releaseId } = await params
+
+  if (!(await canAdminProject(session.user.id, session.user.role, projectId))) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
   const body = await request.json()
   const { isVisible, scorerUserId } = body as {
     isVisible?: boolean
@@ -160,11 +165,15 @@ export async function DELETE(
   }
 ) {
   const session = await auth()
-  if (!session?.user || session.user.role !== 'ADMIN') {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!session?.user) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
   const { projectId, batchId, releaseId } = await params
+
+  if (!(await canAdminProject(session.user.id, session.user.role, projectId))) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
   const release = await getReleaseContext(releaseId)
   if (
     !release ||

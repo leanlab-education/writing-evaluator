@@ -1,14 +1,12 @@
 import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/db'
+import { canAdminProject } from '@/lib/authorization'
 import { NextRequest, NextResponse } from 'next/server'
 
 export async function GET(request: NextRequest) {
   const session = await auth()
   if (!session?.user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
-  if (session.user.role !== 'ADMIN') {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
   const projectId = request.nextUrl.searchParams.get('projectId')
@@ -22,6 +20,10 @@ export async function GET(request: NextRequest) {
       { error: 'projectId is required' },
       { status: 400 }
     )
+  }
+
+  if (!(await canAdminProject(session.user.id, session.user.role, projectId))) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
   if (type !== 'original' && type !== 'reconciled' && type !== 'discrepancies') {

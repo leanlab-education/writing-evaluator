@@ -1,4 +1,5 @@
 import { auth } from '@/lib/auth'
+import { canAdminProject } from '@/lib/authorization'
 import { prisma } from '@/lib/db'
 
 export async function GET(
@@ -7,10 +8,11 @@ export async function GET(
 ) {
   const session = await auth()
   if (!session?.user) return new Response('Unauthorized', { status: 401 })
-  if (session.user.role !== 'ADMIN')
-    return new Response('Forbidden', { status: 403 })
 
   const { projectId } = await params
+
+  if (!(await canAdminProject(session.user.id, session.user.role, projectId)))
+    return new Response('Forbidden', { status: 403 })
   const url = new URL(req.url)
 
   const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10) || 1)

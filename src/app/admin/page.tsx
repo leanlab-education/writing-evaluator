@@ -14,13 +14,22 @@ import { FileText, Users } from 'lucide-react'
 import { CreateProjectDialog } from '@/components/create-project-dialog'
 import { AppShell } from '@/components/app-shell'
 import { statusColors } from '@/lib/status-colors'
+import { isGlobalAdmin, getAdminProjectIds } from '@/lib/authorization'
 
 export default async function AdminDashboard() {
   const session = await auth()
   if (!session?.user) redirect('/login')
-  if (session.user.role !== 'ADMIN') redirect('/')
+
+  const globalAdmin = isGlobalAdmin(session.user.role)
+  let adminProjectIds: string[] = []
+
+  if (!globalAdmin) {
+    adminProjectIds = await getAdminProjectIds(session.user.id)
+    if (adminProjectIds.length === 0) redirect('/')
+  }
 
   const projects = await prisma.project.findMany({
+    where: globalAdmin ? undefined : { id: { in: adminProjectIds } },
     include: {
       _count: {
         select: {
@@ -42,7 +51,7 @@ export default async function AdminDashboard() {
               Manage your writing evaluation projects
             </p>
           </div>
-          <CreateProjectDialog />
+          {globalAdmin && <CreateProjectDialog />}
         </div>
 
         {projects.length === 0 ? (

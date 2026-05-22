@@ -1,4 +1,5 @@
 import { auth } from '@/lib/auth'
+import { canAdminProject } from '@/lib/authorization'
 import { prisma } from '@/lib/db'
 import { periodRange, type Period } from '@/lib/activity-tracker-config'
 import { NextRequest, NextResponse } from 'next/server'
@@ -11,11 +12,12 @@ export async function GET(
   if (!session?.user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
-  if (session.user.role !== 'ADMIN') {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  }
 
   const { projectId } = await params
+
+  if (!(await canAdminProject(session.user.id, session.user.role, projectId))) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
   const { searchParams } = new URL(request.url)
   const periodParam = searchParams.get('period') ?? 'month'
   if (

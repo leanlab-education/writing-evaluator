@@ -3,6 +3,7 @@ import { redirect, notFound } from 'next/navigation'
 import { prisma } from '@/lib/db'
 import { countForAssignment, loadSlotMaps } from '@/lib/evaluator-stats'
 import { ProjectDetailClient } from '@/components/project-detail-client'
+import { canAdminProject } from '@/lib/authorization'
 
 export default async function ProjectDetailPage({
   params,
@@ -13,9 +14,10 @@ export default async function ProjectDetailPage({
 }) {
   const session = await auth()
   if (!session?.user) redirect('/login')
-  if (session.user.role !== 'ADMIN') redirect('/')
 
   const { projectId } = await params
+  if (!(await canAdminProject(session.user.id, session.user.role, projectId))) redirect('/')
+
   const { tab } = await searchParams
 
   // Fetch all data in parallel
@@ -168,6 +170,7 @@ export default async function ProjectDetailPage({
   const evaluators = evaluatorsRaw.map((ev) => ({
     id: ev.id,
     user: ev.user,
+    role: ev.role,
     assignedCount: assignedByUser.get(ev.user.id) ?? 0,
     completedCount: completedByUser.get(ev.user.id) ?? 0,
     lastScoredAt: lastScoredByUser.get(ev.user.id) ?? null,

@@ -109,6 +109,7 @@ interface EvaluatorRow {
     name: string | null
     email: string
   }
+  role?: string
   assignedCount: number
   completedCount: number
   lastScoredAt: string | null
@@ -738,12 +739,45 @@ export function ProjectDetailClient({
                         ? formatRelativeTime(ev.lastScoredAt)
                         : 'Never'
                       return (
-                        <TableRow key={ev.id} className="hover:bg-muted/30 transition-colors">
+                        <TableRow key={ev.id} className="group/row hover:bg-muted/30 transition-colors">
                           <TableCell className="pl-5">
                             <div className="flex items-center gap-2.5">
                               <UserAvatar name={ev.user.id} size={28} />
-                              <div>
+                              <div className="flex items-center gap-1.5">
                                 <p className="text-sm font-medium text-foreground">{displayAnnotatorName(ev.user.id, ev.user.name, project.usePseudonyms)}</p>
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    const newRole = ev.role === 'PROJECT_ADMIN' ? 'EVALUATOR' : 'PROJECT_ADMIN'
+                                    try {
+                                      const res = await fetch(
+                                        `/api/projects/${projectId}/evaluators/${ev.user.id}/role`,
+                                        {
+                                          method: 'PATCH',
+                                          headers: { 'Content-Type': 'application/json' },
+                                          body: JSON.stringify({ role: newRole }),
+                                        }
+                                      )
+                                      if (res.ok) {
+                                        setEvaluators((prev) =>
+                                          prev.map((e) =>
+                                            e.id === ev.id ? { ...e, role: newRole } : e
+                                          )
+                                        )
+                                      }
+                                    } catch {
+                                      // silently fail
+                                    }
+                                  }}
+                                  className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-medium transition-colors ${
+                                    ev.role === 'PROJECT_ADMIN'
+                                      ? 'bg-primary/10 text-primary hover:bg-primary/20'
+                                      : 'bg-muted text-muted-foreground hover:bg-muted/80 opacity-0 group-hover/row:opacity-100'
+                                  }`}
+                                  title={ev.role === 'PROJECT_ADMIN' ? 'Click to remove project admin' : 'Click to make project admin'}
+                                >
+                                  {ev.role === 'PROJECT_ADMIN' ? 'Admin' : 'Make Admin'}
+                                </button>
                               </div>
                               {low && <AlertTriangle className="h-3.5 w-3.5 text-destructive shrink-0" />}
                             </div>

@@ -2,6 +2,7 @@ import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/db'
 import { redirect } from 'next/navigation'
 import { ReconcileClient } from './reconcile-client'
+import { canAdminProject } from '@/lib/authorization'
 
 export default async function ReconcilePage({
   params,
@@ -36,8 +37,7 @@ export default async function ReconcilePage({
     redirect('/')
   }
 
-  // Verify user is assigned to this release (or is admin)
-  if (session.user.role !== 'ADMIN') {
+  if (!(await canAdminProject(session.user.id, session.user.role, projectId))) {
     const assignment = await prisma.batchAssignment.findFirst({
       where: {
         batchId,
