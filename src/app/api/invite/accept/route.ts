@@ -28,5 +28,5 @@ export async function POST(request: Request) {
 
   await markTokenUsed(token)
 
-  return NextResponse.json({ success: true })
+  return NextResponse.json({ success: true, email: record.email })
 }

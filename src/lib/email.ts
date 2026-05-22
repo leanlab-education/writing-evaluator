@@ -49,7 +49,6 @@ export async function sendInviteEmail(
           </a>
         </p>
         <p style="color: #666; font-size: 14px;">This link expires in 7 days.</p>
-        <p style="color: #666; font-size: 14px;">If you didn't expect this invitation, you can ignore this email.</p>
       </div>
     `,
   })

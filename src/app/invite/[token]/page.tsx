@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { signIn } from 'next-auth/react'
 import { useParams, useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -45,14 +46,28 @@ export default function InvitePage() {
       })
 
       if (res.ok) {
-        setSuccess(true)
+        const data = await res.json()
+        // Sign the user in with the credentials they just set so they land
+        // straight on their dashboard instead of a second login screen.
+        const result = await signIn('credentials', {
+          email: data.email,
+          password,
+          redirect: false,
+        })
+        if (result?.error) {
+          // Password was set fine; just fall back to manual sign-in.
+          setSuccess(true)
+          setLoading(false)
+        } else {
+          router.push('/')
+        }
       } else {
         const data = await res.json()
         setError(data.error || 'Something went wrong')
+        setLoading(false)
       }
     } catch {
       setError('Something went wrong. Please try again.')
-    } finally {
       setLoading(false)
     }
   }
@@ -98,7 +113,7 @@ export default function InvitePage() {
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="At least 6 characters"
+                placeholder="At least 8 characters"
                 required
               />
             </div>
