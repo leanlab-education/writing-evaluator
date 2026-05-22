@@ -65,7 +65,7 @@ User              — email, hashedPassword, role (ADMIN | EVALUATOR)
 Project           — name, status (display-only, derived from batch states)
 RubricDimension   — per-project scoring criteria with configurable scales
 FeedbackItem      — imported from CSV (studentText, feedbackText, feedbackSource, teacherId, conjunctionId, optimal, feedbackType, slotIndex)
-ProjectEvaluator  — M:M join between projects and evaluators
+ProjectEvaluator  — M:M join between projects and users, with per-project role (EVALUATOR | PROJECT_ADMIN)
 Assignment        — which evaluator scores which items
 Batch             — groups of items with status (DRAFT → SCORING → RECONCILING → COMPLETE), type (REGULAR | TRAINING), isDoubleScored
 BatchAssignment   — annotator ↔ batch with scoringRole (PRIMARY | DOUBLE), one row per annotator who scores anything in the batch
@@ -78,6 +78,7 @@ AuthToken         — invite/reset tokens with expiry (type: INVITE | RESET)
 
 Key relationships:
 - `feedbackSource` is an enum: `AI` or `HUMAN` — hidden during scoring (blinded), revealed only on export
+- `ProjectEvaluator.role` is per-project: `PROJECT_ADMIN` grants full admin rights on that one project (rubric, batches, import, export, annotators) without global admin access. See the Auth section.
 - Rubric dimensions are rows in the DB, not hardcoded columns — fully configurable per project
 - `Score` has a unique constraint on `[feedbackItemId, userId, dimensionId, isReconciled]`
 - `FeedbackItem.slotIndex` (0 or 1) is set on batch creation for non-double-scored regular batches. One CSPRNG shuffle per batch splits items ~50/50; the same slot label applies across every team release in the batch (item with slot 0 always goes to each team's slot-A member, item with slot 1 to slot-B).
@@ -96,10 +97,14 @@ For every team release in a batch:
 - **Auth.js v5** with Credentials provider (email + bcrypt password)
 - **JWT strategy** (no database sessions)
 - **Auth callback** in `auth.ts` protects all routes except `/login`, `/invite/*`, `/reset-password/*`, and specific public API routes (`/api/auth/*`, `/api/invite/accept`, `/api/reset-password/*`)
-- **Role check**: Server components use `const session = await auth()` then check `session.user.role`
-- **Roles**: `ADMIN` (manages projects, imports data, configures rubrics) and `EVALUATOR` (scores items)
+- **Global roles** (`User.role`): `ADMIN` (manages all projects, accounts, invites, project creation) and `EVALUATOR` (scores items)
+- **Project-scoped admin**: a user can be a `PROJECT_ADMIN` on specific projects via `ProjectEvaluator.role` without being a global admin. They get full admin rights on those projects only (rubric, batches, import, export, annotators) and cannot see other projects, manage accounts, send invites, or create projects.
+  - **Always authorize project-scoped actions with `canAdminProject(userId, globalRole, projectId)` from `src/lib/authorization.ts`** — never inline `role !== 'ADMIN'`. It returns true for global admins OR project admins of that specific project. Helpers `isGlobalAdmin()` and `getAdminProjectIds()` live alongside it. Checks hit the DB per-request (not the JWT), so role changes take effect immediately.
+  - **Global-admin-only routes** (must stay `role !== 'ADMIN'`): `POST /api/projects`, `/api/users/*`, `/api/invite`, `/admin/accounts`.
+  - On sign-in, a project admin lands on their project's admin view (`/admin/[projectId]`) — or the filtered `/admin` list if they admin several — not the annotator dashboard. Set/unset the role from a project's Annotators tab ("Make Admin" toggle) or `PATCH /api/projects/[projectId]/evaluators/[userId]/role`.
+- **Role check**: Server components use `const session = await auth()` then check `session.user.role` (global) or `await canAdminProject(...)` (project-scoped)
 - **Magic link login**: StudyFlow sends users to `/login?studyflow_token=...&email=...` — the login page auto-verifies the JWT and creates/finds the evaluator account
-- **Email invite flow**: Admin enters email → Resend sends invite → user clicks link → sets password at `/invite/[token]`
+- **Email invite flow**: Admin enters email → Resend sends invite (copy varies by recipient: global admin / project admin / annotator — see `sendInviteEmail` variants in `src/lib/email.ts`) → user clicks link → sets password at `/invite/[token]` → **auto-signed in** and redirected to their dashboard (no second login). Invite links expire in 7 days.
 - **Password reset**: Email-based reset link at `/reset-password`
 
 - **Session timeout**: 8 hours (JWT maxAge)
@@ -141,6 +146,7 @@ src/
 │       ├── projects/[projectId]/
 │       │   ├── route.ts                  # GET (detail with rubric) / PATCH (update status)
 │       │   ├── evaluators/route.ts       # GET / POST (add evaluator)
+│       │   ├── evaluators/[userId]/role/route.ts # PATCH (set EVALUATOR | PROJECT_ADMIN on this project)
 │       │   ├── import-evaluators/route.ts # POST (import evaluators from StudyFlow)
 │       │   ├── assignments/route.ts      # POST (assign all items to evaluators)
 │       │   └── stats/route.ts            # GET (scored item count)
@@ -164,6 +170,7 @@ src/
 │   └── ui/                              # shadcn/ui components
 ├── lib/
 │   ├── auth.ts                           # Auth.js config (providers, callbacks, JWT, magic link verify)
+│   ├── authorization.ts                  # canAdminProject() / isGlobalAdmin() / getAdminProjectIds() — project-scoped admin checks
 │   ├── db.ts                             # Prisma client with Neon adapter
 │   ├── csv-parser.ts                     # CSV parsing + validation for feedback item import
 │   ├── email.ts                          # Resend email sending (invites, password reset)
