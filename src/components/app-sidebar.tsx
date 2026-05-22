@@ -34,7 +34,6 @@ interface AppSidebarProps {
   collapsed: boolean
   onToggle: () => void
   projectContext?: ProjectContext
-  isProjectAdmin?: boolean
 }
 
 interface NavItem {
@@ -82,12 +81,14 @@ function SidebarThemeToggle({ collapsed }: { collapsed: boolean }) {
   )
 }
 
-export function AppSidebar({ collapsed, onToggle, projectContext, isProjectAdmin }: AppSidebarProps) {
+export function AppSidebar({ collapsed, onToggle, projectContext }: AppSidebarProps) {
   const { data: session } = useSession()
   const pathname = usePathname()
 
   const isGlobalAdmin = session?.user?.role === 'ADMIN'
-  const showAdminNav = isGlobalAdmin || isProjectAdmin || pathname.startsWith('/admin/')
+  // Non-global users only reach /admin/* if they're a project admin (the home
+  // page redirects them there), so the admin pathname is a reliable signal.
+  const onAdminPage = pathname.startsWith('/admin')
 
   const navItems: NavItem[] = isGlobalAdmin
     ? [
@@ -102,16 +103,11 @@ export function AppSidebar({ collapsed, onToggle, projectContext, isProjectAdmin
           icon: <UsersRound className="size-4 shrink-0" />,
         },
       ]
-    : showAdminNav
+    : onAdminPage
       ? [
           {
-            href: '/',
-            label: 'My Projects',
-            icon: <BookOpen className="size-4 shrink-0" />,
-          },
-          {
             href: '/admin',
-            label: 'Admin',
+            label: 'Projects',
             icon: <LayoutGrid className="size-4 shrink-0" />,
           },
         ]

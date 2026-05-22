@@ -9,8 +9,15 @@ export default async function HomePage() {
   const session = await auth()
   if (!session?.user) redirect('/login')
 
-  // Admins go straight to the admin dashboard
+  // Global admins go straight to the admin dashboard
   if (session.user.role === 'ADMIN') redirect('/admin')
+
+  // Project admins land on their project's admin view — they manage a project
+  // rather than annotate, so the annotator dashboard isn't their home. One
+  // project goes straight to it; several falls back to the filtered list.
+  const adminProjectIds = await getAdminProjectIds(session.user.id)
+  if (adminProjectIds.length === 1) redirect(`/admin/${adminProjectIds[0]}`)
+  if (adminProjectIds.length > 1) redirect('/admin')
 
   // Evaluator: fetch assigned projects server-side
   const evaluatorProjects = await prisma.projectEvaluator.findMany({
@@ -172,9 +179,6 @@ export default async function HomePage() {
     })
   }
 
-  const adminProjectIdList = await getAdminProjectIds(session.user.id)
-  const adminProjectIdSet = new Set(adminProjectIdList)
-
   const projects = evaluatorProjects.map((ep) => {
     const batches = batchesByProject.get(ep.projectId) || []
     const assignmentCount = batches.reduce((sum, b) => sum + b.itemCount, 0)
@@ -186,7 +190,6 @@ export default async function HomePage() {
       assignmentCount,
       completedCount,
       batches,
-      isProjectAdmin: adminProjectIdSet.has(ep.projectId),
     }
   })
 
@@ -194,7 +197,6 @@ export default async function HomePage() {
     <EvaluatorDashboard
       projects={projects}
       userName={session.user.name || session.user.email || 'Annotator'}
-      hasAdminProjects={adminProjectIdList.length > 0}
     />
   )
 }

@@ -11,10 +11,9 @@ import {
 } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
-import { FileText, Settings } from 'lucide-react'
+import { FileText } from 'lucide-react'
 import { AppShell } from '@/components/app-shell'
 import { MyTimeCard } from '@/components/my-time-card'
-import Link from 'next/link'
 
 interface BatchInfo {
   id: string
@@ -49,22 +48,19 @@ interface EvaluatorProject {
   completedCount: number
   batches: BatchInfo[]
   team?: TeamInfo | null
-  isProjectAdmin?: boolean
 }
 
 export function EvaluatorDashboard({
   projects,
   userName,
-  hasAdminProjects,
 }: {
   projects: EvaluatorProject[]
   userName: string
-  hasAdminProjects?: boolean
 }) {
   const router = useRouter()
 
   return (
-    <AppShell isProjectAdmin={hasAdminProjects}>
+    <AppShell>
       <div className="mx-auto max-w-3xl px-4 py-10 sm:px-6 lg:px-8">
         <div className="mb-6">
           <h1 className="text-2xl font-bold tracking-tight">My Projects</h1>
@@ -102,21 +98,9 @@ export function EvaluatorDashboard({
                 >
                   <CardHeader className="pb-2">
                     <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <CardTitle className="text-base">
-                          {ep.project.name}
-                        </CardTitle>
-                        {ep.isProjectAdmin && (
-                          <Link
-                            href={`/admin/${ep.project.id}`}
-                            onClick={(e) => e.stopPropagation()}
-                            className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary transition-colors hover:bg-primary/20"
-                          >
-                            <Settings className="size-3" />
-                            Manage
-                          </Link>
-                        )}
-                      </div>
+                      <CardTitle className="text-base">
+                        {ep.project.name}
+                      </CardTitle>
                       <Badge
                         variant="outline"
                         className={

@@ -12,12 +12,11 @@ interface AppShellProps {
   children: React.ReactNode
   defaultCollapsed?: boolean
   projectContext?: ProjectContext
-  isProjectAdmin?: boolean
 }
 
 const emptySubscribe = () => () => {}
 
-export function AppShell({ children, defaultCollapsed, projectContext, isProjectAdmin }: AppShellProps) {
+export function AppShell({ children, defaultCollapsed, projectContext }: AppShellProps) {
   useActivityTracker()
   const mounted = useSyncExternalStore(emptySubscribe, () => true, () => false)
 
@@ -52,7 +51,7 @@ export function AppShell({ children, defaultCollapsed, projectContext, isProject
       {/* Desktop sidebar */}
       <div className="hidden lg:block">
         <div className="sticky top-0 h-screen">
-          <AppSidebar collapsed={collapsed} onToggle={handleToggle} projectContext={projectContext} isProjectAdmin={isProjectAdmin} />
+          <AppSidebar collapsed={collapsed} onToggle={handleToggle} projectContext={projectContext} />
         </div>
       </div>
 
