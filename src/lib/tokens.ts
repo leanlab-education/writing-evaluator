@@ -2,7 +2,7 @@ import { randomBytes } from 'crypto'
 import { prisma } from './db'
 import { AuthTokenType } from '@/generated/prisma/client'
 
-const INVITE_EXPIRY_HOURS = 72
+const INVITE_EXPIRY_HOURS = 168
 const RESET_EXPIRY_HOURS = 1
 
 export async function createToken(email: string, type: AuthTokenType) {

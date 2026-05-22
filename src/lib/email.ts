@@ -12,10 +12,27 @@ function getAppUrl() {
   return process.env.APP_URL || 'https://writing-evaluator.vercel.app'
 }
 
-export async function sendInviteEmail(email: string, token: string, name?: string | null, role?: string) {
+type InviteVariant = 'annotator' | 'admin' | 'project-admin'
+
+export async function sendInviteEmail(
+  email: string,
+  token: string,
+  name?: string | null,
+  variant: InviteVariant = 'annotator',
+  projectName?: string | null
+) {
   const url = `${getAppUrl()}/invite/${token}`
   const greeting = name ? `Hi ${name},` : 'Hi,'
-  const roleLabel = role === 'ADMIN' ? 'an admin' : 'an annotator'
+
+  let intro: string
+  if (variant === 'admin') {
+    intro = `You've been given admin access to Writing Evaluator. Click below to set your password and get started.`
+  } else if (variant === 'project-admin') {
+    const project = projectName ? `a test project ("${projectName}")` : 'a test project'
+    intro = `You've been given admin access to ${project} in Writing Evaluator. Click below to set your password and get started.`
+  } else {
+    intro = `You've been invited to join Writing Evaluator as an annotator. Click below to set your password and get started.`
+  }
 
   await getResend().emails.send({
     from: FROM_EMAIL,
@@ -25,13 +42,13 @@ export async function sendInviteEmail(email: string, token: string, name?: strin
       <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
         <h2>Writing Evaluator</h2>
         <p>${greeting}</p>
-        <p>You've been invited to join the Writing Evaluator as ${roleLabel}. Click the link below to set your password and get started.</p>
+        <p>${intro}</p>
         <p style="margin: 24px 0;">
           <a href="${url}" style="background: #5b21b6; color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; display: inline-block;">
             Set Your Password
           </a>
         </p>
-        <p style="color: #666; font-size: 14px;">This link expires in 72 hours.</p>
+        <p style="color: #666; font-size: 14px;">This link expires in 7 days.</p>
         <p style="color: #666; font-size: 14px;">If you didn't expect this invitation, you can ignore this email.</p>
       </div>
     `,

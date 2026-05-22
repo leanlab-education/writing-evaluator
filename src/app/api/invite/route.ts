@@ -44,7 +44,7 @@ export async function POST(request: Request) {
   // Generate invite token and send email (only if user has no password)
   if (!user.hashedPassword) {
     const token = await createToken(normalizedEmail, 'INVITE')
-    await sendInviteEmail(normalizedEmail, token, user.name, user.role)
+    await sendInviteEmail(normalizedEmail, token, user.name, user.role === 'ADMIN' ? 'admin' : 'annotator')
   }
 
   return NextResponse.json({
