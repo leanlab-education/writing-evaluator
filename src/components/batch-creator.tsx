@@ -10,6 +10,14 @@ import { cn } from '@/lib/utils'
 import { TeamAvatar, UserAvatar } from '@/components/user-avatar'
 import { displayAnnotatorName } from '@/lib/generate-name'
 
+interface DimensionIRR {
+  dimensionId: string
+  dimensionLabel: string
+  agreementPct: number | null
+  agreedPairs: number
+  totalPairs: number
+}
+
 interface TeamReleaseRow {
   id: string
   teamId: string
@@ -27,6 +35,7 @@ interface TeamReleaseRow {
     agreementPct: number | null
     agreedPairs: number
     totalPairs: number
+    perDimension: DimensionIRR[]
   } | null
 }
 
@@ -53,6 +62,7 @@ interface BatchRow {
     readyTeamCount: number
     averageAgreementPct: number | null
     lowestAgreementPct: number | null
+    perDimension: DimensionIRR[]
   } | null
   type: string
   isDoubleScored: boolean
@@ -382,6 +392,36 @@ export function BatchCreator({
                 {/* Expanded content */}
                 {isExpanded && (
                   <div className="space-y-3 border-t border-border/50 bg-muted/20 px-4 py-3">
+                    {/* Batch-level IRR breakdown by criterion */}
+                    {hasIrr && (irrSummary?.perDimension.length ?? 0) > 0 && (
+                      <div className="rounded-xl border border-border bg-background px-3 py-2.5">
+                        <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          IRR by criterion
+                        </p>
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-1 sm:grid-cols-4">
+                          {irrSummary!.perDimension.map((dim) => (
+                            <div
+                              key={dim.dimensionId}
+                              className="flex items-center justify-between gap-2 text-[11px]"
+                            >
+                              <span className="truncate text-muted-foreground" title={dim.dimensionLabel}>
+                                {dim.dimensionLabel}
+                              </span>
+                              <span
+                                className={cn(
+                                  'shrink-0 font-bold tabular-nums',
+                                  getIrrColorClass(dim.agreementPct)
+                                )}
+                                title={`${dim.agreedPairs}/${dim.totalPairs} agreed`}
+                              >
+                                {dim.agreementPct != null ? `${dim.agreementPct}%` : '—'}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
                     {batch.teamReleases.length === 0 ? (
                       <div className="rounded-xl border border-dashed border-border px-3 py-3 text-sm text-muted-foreground">
                         No team assignments found for this batch.
@@ -418,12 +458,37 @@ export function BatchCreator({
                                 </div>
                               ))}
                             </div>
-                            {/* Criteria */}
-                            <div className="mb-2 truncate text-[10px] text-muted-foreground/60">
-                              {batch.type === 'TRAINING'
-                                ? 'All criteria'
-                                : release.dimensions.map((d) => d.label).join(', ')}
-                            </div>
+                            {/* Criteria, with per-criterion IRR once scores exist */}
+                            {release.irr?.isApplicable &&
+                            release.irr.perDimension.length > 0 ? (
+                              <div className="mb-2 space-y-0.5">
+                                {release.irr.perDimension.map((dim) => (
+                                  <div
+                                    key={dim.dimensionId}
+                                    className="flex items-center justify-between gap-2 text-[10px]"
+                                  >
+                                    <span className="truncate text-muted-foreground/60" title={dim.dimensionLabel}>
+                                      {dim.dimensionLabel}
+                                    </span>
+                                    <span
+                                      className={cn(
+                                        'shrink-0 font-semibold tabular-nums',
+                                        getIrrColorClass(dim.agreementPct)
+                                      )}
+                                      title={`${dim.agreedPairs}/${dim.totalPairs} agreed`}
+                                    >
+                                      {dim.agreementPct != null ? `${dim.agreementPct}%` : '—'}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <div className="mb-2 truncate text-[10px] text-muted-foreground/60">
+                                {batch.type === 'TRAINING'
+                                  ? 'All criteria'
+                                  : release.dimensions.map((d) => d.label).join(', ')}
+                              </div>
+                            )}
                             {/* Footer: status + visible toggle */}
                             <div className="flex items-center justify-between">
                               <Badge className={cn(batchStatusColors[release.status] || '', 'text-[10px]')}>

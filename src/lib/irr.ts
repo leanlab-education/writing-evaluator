@@ -45,6 +45,16 @@ export interface BatchIRRSummary {
   readyTeamCount: number
   averageAgreementPct: number | null
   lowestAgreementPct: number | null
+  // Batch-level per-criterion rollup, aggregated across all team releases.
+  // For regular double-scored batches each criterion belongs to one team; for
+  // training batches every team scores every criterion, so pairs are summed.
+  perDimension: {
+    dimensionId: string
+    dimensionLabel: string
+    agreementPct: number | null
+    agreedPairs: number
+    totalPairs: number
+  }[]
   teams: TeamReleaseIRR[]
 }
 
@@ -107,6 +117,7 @@ export async function computeBatchIRRSummary(
       readyTeamCount: 0,
       averageAgreementPct: null,
       lowestAgreementPct: null,
+      perDimension: [],
       teams: batch.teamReleases.map((release) => ({
         releaseId: release.id,
         teamId: release.teamId,
@@ -264,6 +275,45 @@ export async function computeBatchIRRSummary(
 
   const computedTeams = teams.filter((team) => team.agreementPct !== null)
 
+  // Batch-level per-criterion rollup across all team releases.
+  const dimensionSortOrder = new Map<string, number>(
+    [
+      ...projectDimensions,
+      ...batch.teamReleases.flatMap((release) =>
+        release.team.dimensions.map((dimension) => dimension.dimension)
+      ),
+    ].map((dimension) => [dimension.id, dimension.sortOrder])
+  )
+  const batchPerDim = new Map<
+    string,
+    { label: string; agreed: number; total: number }
+  >()
+  for (const team of teams) {
+    for (const dimension of team.perDimension) {
+      const entry = batchPerDim.get(dimension.dimensionId) ?? {
+        label: dimension.dimensionLabel,
+        agreed: 0,
+        total: 0,
+      }
+      entry.agreed += dimension.agreedPairs
+      entry.total += dimension.totalPairs
+      batchPerDim.set(dimension.dimensionId, entry)
+    }
+  }
+  const perDimension = Array.from(batchPerDim.entries())
+    .sort(
+      (a, b) =>
+        (dimensionSortOrder.get(a[0]) ?? 0) - (dimensionSortOrder.get(b[0]) ?? 0)
+    )
+    .map(([dimensionId, entry]) => ({
+      dimensionId,
+      dimensionLabel: entry.label,
+      agreementPct:
+        entry.total > 0 ? Math.round((entry.agreed / entry.total) * 100) : null,
+      agreedPairs: entry.agreed,
+      totalPairs: entry.total,
+    }))
+
   return {
     applicableTeamCount: teams.filter((team) => team.isApplicable).length,
     computedTeamCount: computedTeams.length,
@@ -281,6 +331,7 @@ export async function computeBatchIRRSummary(
       computedTeams.length > 0
         ? Math.min(...computedTeams.map((team) => team.agreementPct ?? 100))
         : null,
+    perDimension,
     teams,
   }
 }

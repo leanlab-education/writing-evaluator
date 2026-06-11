@@ -143,6 +143,13 @@ interface BatchRow {
     readyTeamCount: number
     averageAgreementPct: number | null
     lowestAgreementPct: number | null
+    perDimension: {
+      dimensionId: string
+      dimensionLabel: string
+      agreementPct: number | null
+      agreedPairs: number
+      totalPairs: number
+    }[]
   } | null
   ranges: {
     id: string
@@ -167,6 +174,13 @@ interface BatchRow {
       agreementPct: number | null
       agreedPairs: number
       totalPairs: number
+      perDimension: {
+        dimensionId: string
+        dimensionLabel: string
+        agreementPct: number | null
+        agreedPairs: number
+        totalPairs: number
+      }[]
     } | null
   }[]
   evaluators: {

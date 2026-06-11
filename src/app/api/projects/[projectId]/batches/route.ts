@@ -110,6 +110,13 @@ export async function GET(
             readyTeamCount: number
             averageAgreementPct: number | null
             lowestAgreementPct: number | null
+            perDimension: {
+              dimensionId: string
+              dimensionLabel: string
+              agreementPct: number | null
+              agreedPairs: number
+              totalPairs: number
+            }[]
           }
         | null = null
       let teamIrrByReleaseId = new Map<
@@ -120,6 +127,13 @@ export async function GET(
           agreementPct: number | null
           agreedPairs: number
           totalPairs: number
+          perDimension: {
+            dimensionId: string
+            dimensionLabel: string
+            agreementPct: number | null
+            agreedPairs: number
+            totalPairs: number
+          }[]
         }
       >()
       if (
@@ -136,6 +150,7 @@ export async function GET(
               readyTeamCount: irr.readyTeamCount,
               averageAgreementPct: irr.averageAgreementPct,
               lowestAgreementPct: irr.lowestAgreementPct,
+              perDimension: irr.perDimension,
             }
           : null
         teamIrrByReleaseId = new Map(
@@ -147,6 +162,7 @@ export async function GET(
               agreementPct: team.agreementPct,
               agreedPairs: team.agreedPairs,
               totalPairs: team.totalPairs,
+              perDimension: team.perDimension,
             },
           ]) ?? []
         )
