@@ -938,12 +938,13 @@ export function ReconcileClient({
                             Final Score
                           </div>
                           {(() => {
-                            // Concede-or-escalate (Luofan 2026-07-29): you may
-                            // not resolve a discrepancy by re-selecting your own
-                            // original score — only your partner can record it.
-                            // Compare against the PERSISTED final (not the local
-                            // unsaved selection) so an unsaved click can always
-                            // be reverted; the server enforces the same rule.
+                            // Concede-or-escalate (Luofan 2026-07-29): the
+                            // FIRST recording of a discrepancy may not be your
+                            // own original score — only your partner can record
+                            // it. Once a final exists (persisted != null),
+                            // editing is a deliberate correction and every
+                            // value is selectable; the server enforces the
+                            // same rule and records who changed what.
                             const myOriginal =
                               disc.evaluatorA.userId === userId
                                 ? disc.evaluatorA.value
@@ -953,7 +954,7 @@ export function ReconcileClient({
                             const persistedKey = `${currentItem.feedbackItemId}::${disc.dimensionId}`
                             const persisted = persistedFinals[persistedKey] ?? null
                             const blockedValue =
-                              myOriginal != null && persisted !== myOriginal
+                              myOriginal != null && persisted == null
                                 ? myOriginal
                                 : null
                             return (

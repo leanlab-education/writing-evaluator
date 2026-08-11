@@ -77,16 +77,19 @@ describe('evaluateConcessionRule', () => {
     ).toEqual({ ok: true })
   })
 
-  it('blocks flipping an existing final BACK to your own original', () => {
-    // Final currently = partner's value (submitter conceded earlier); the
-    // submitter cannot unilaterally revert it to their own original.
-    const res = evaluateConcessionRule({
-      submittedValue: 1,
-      submitterOriginal: 1,
-      partnerOriginal: 0,
-      existingFinal: 0,
-    })
-    expect(res.ok).toBe(false)
+  it('allows deliberately correcting an existing final to your own original', () => {
+    // Final currently = partner's value (e.g. an accidental concession —
+    // Luofan's scenario 2). Editing a recorded final is a deliberate act, not
+    // a habit-click, so any value is allowed; reconciledById records who did
+    // it. Only the FIRST recording of a discrepancy is constrained.
+    expect(
+      evaluateConcessionRule({
+        submittedValue: 1,
+        submitterOriginal: 1,
+        partnerOriginal: 0,
+        existingFinal: 0,
+      })
+    ).toEqual({ ok: true })
   })
 
   it('allows users with no original score (admins / non-pair members)', () => {

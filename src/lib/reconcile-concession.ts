@@ -14,9 +14,13 @@
 // The rule intentionally does NOT fire when:
 //   - The pair agreed on the value (no discrepancy — agreed dimensions are
 //     re-sent on every save).
-//   - The submitted value matches the already-saved final (a no-op resave —
-//     the scoring screen re-saves on navigation, and a partner's earlier
-//     concession may legitimately equal the submitter's original).
+//   - A final is already recorded (existingFinal != null). Only the FIRST
+//     recording of a discrepancy is constrained: Luofan's failure modes are
+//     accidents (habit-clicks, misclicks), and once a final exists, going back
+//     in is a deliberate correction — including correcting an accidental
+//     concession back to your own original (her scenario 2). reconciledById
+//     records who made every change, so deliberate flips are visible, not
+//     silent. (Taylor, 2026-08-11.) This also covers no-op resaves.
 //   - The submitter didn't score this (item, dimension) at all (admins, or an
 //     annotator outside the pair): no original, nothing to reassert.
 //
@@ -51,7 +55,7 @@ export function evaluateConcessionRule(input: {
   if (
     isDiscrepancy &&
     submittedValue === submitterOriginal &&
-    submittedValue !== existingFinal
+    existingFinal == null
   ) {
     return { ok: false, httpStatus: 403, error: CONCESSION_BLOCKED_MESSAGE }
   }
