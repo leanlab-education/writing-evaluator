@@ -30,7 +30,7 @@ interface BatchInfo {
 // How the Scoring batch list is grouped. The base order is always
 // chronological (batch createdAt); the only choice is the grouping dimension.
 // (Abi, 2026-07-29)
-type ScoringGroupBy = 'status' | 'activity' | 'none'
+type ScoringGroupBy = 'status' | 'activity' | 'date'
 
 // Label a batch's activity. The conjunction (Because/But/So) is appended only
 // when `withConjunction` — i.e. when the same activity appears with more than
@@ -102,7 +102,7 @@ export function EvaluatorProjectPage({
   const [groupBy, setGroupBy] = useState<ScoringGroupBy>('status')
   useEffect(() => {
     const stored = localStorage.getItem(`scoring-group-by:${project.id}`)
-    if (stored === 'status' || stored === 'activity' || stored === 'none') {
+    if (stored === 'status' || stored === 'activity' || stored === 'date') {
       // Hydrate the persisted preference after mount — a lazy initializer would
       // read localStorage during SSR and mismatch the first client render.
       // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -360,7 +360,7 @@ export function EvaluatorProjectPage({
                             [
                               ['status', 'Status'],
                               ['activity', 'Activity'],
-                              ['none', 'None'],
+                              ['date', 'Date'],
                             ] as const
                           ).map(([value, label]) => (
                             <button
